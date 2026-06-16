@@ -164,7 +164,7 @@ async function loadGame() {
     return;
   }
 
-  if (result.status === "FINISHED") {
+  if (result.status === "FINISHED" || result.status === "ARCHIVED") {
     showOnly("finishedScreen");
     return;
   }

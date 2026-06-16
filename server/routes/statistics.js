@@ -447,6 +447,96 @@ async function openTargetTaskForTeam({
   return true;
 }
 
+async function completeTeamToFinish({
+  team,
+  tasks,
+  completedAt,
+  commentPrefix
+}) {
+  if (team.finished_at) {
+    return {
+      team_id: team.id,
+      team_name: team.name,
+      status: "skipped",
+      reason: "Команда вже фінішувала"
+    };
+  }
+
+  const activeTeamTask = await dbGet(
+    `
+    SELECT
+      team_tasks.task_id,
+      team_tasks.opened_at,
+      tasks.sort_order
+    FROM team_tasks
+    JOIN tasks ON tasks.id = team_tasks.task_id
+    WHERE team_tasks.team_id = ?
+      AND team_tasks.opened_at IS NOT NULL
+      AND team_tasks.completed_at IS NULL
+    ORDER BY team_tasks.opened_at DESC, tasks.sort_order DESC
+    LIMIT 1
+    `,
+    [team.id]
+  );
+
+  let currentSortOrder = 0;
+  let completedCurrent = false;
+  let skippedCount = 0;
+
+  if (activeTeamTask) {
+    const currentTask = tasks.find(
+      task => Number(task.id) === Number(activeTeamTask.task_id)
+    );
+
+    if (currentTask) {
+      currentSortOrder = Number(currentTask.sort_order);
+
+      completedCurrent = await completeOpenedTeamTask({
+        teamId: team.id,
+        task: currentTask,
+        completedAt,
+        openedAt: activeTeamTask.opened_at,
+        commentPrefix
+      });
+    }
+  }
+
+  const tasksToSkip = tasks.filter(task =>
+    Number(task.sort_order) > currentSortOrder
+  );
+
+  for (const task of tasksToSkip) {
+    const created = await createSkippedCompletedTeamTask({
+      teamId: team.id,
+      task,
+      completedAt
+    });
+
+    if (created) {
+      skippedCount += 1;
+    }
+  }
+
+  await dbRun(
+    `
+    UPDATE teams
+    SET finished_at = ?
+    WHERE id = ?
+      AND finished_at IS NULL
+    `,
+    [completedAt, team.id]
+  );
+
+  return {
+    team_id: team.id,
+    team_name: team.name,
+    status: "finished",
+    completed_current_task: completedCurrent,
+    skipped_tasks_count: skippedCount,
+    reason: "Команду переведено на фініш"
+  };
+}
+
 async function getRunById(runId) {
   return dbGet(
     `
@@ -1090,6 +1180,7 @@ router.post(
     const teamIds = Array.isArray(req.body.teamIds)
       ? req.body.teamIds.map(Number).filter(Boolean)
       : [];
+    const finishGame = Boolean(req.body.finishGame);
     const targetTaskId = Number(req.body.targetTaskId) || 0;
 
     if (!teamIds.length) {
@@ -1098,9 +1189,9 @@ router.post(
       });
     }
 
-    if (!targetTaskId) {
+    if (!finishGame && !targetTaskId) {
       return res.status(400).json({
-        error: "Оберіть завдання, на яке потрібно перевести команди"
+        error: "Оберіть завдання або фініш"
       });
     }
 
@@ -1120,11 +1211,13 @@ router.post(
       }
 
       const tasks = await getTasksForRun(runId);
-      const targetTask = tasks.find(
-        task => Number(task.id) === Number(targetTaskId)
-      );
+      const targetTask = finishGame
+        ? null
+        : tasks.find(
+            task => Number(task.id) === Number(targetTaskId)
+          );
 
-      if (!targetTask) {
+      if (!finishGame && !targetTask) {
         return res.status(404).json({
           error: "Цільове завдання не знайдено у цьому запуску"
         });
@@ -1163,6 +1256,18 @@ router.post(
               status: "skipped",
               reason: "Команда вже фінішувала"
             });
+            continue;
+          }
+
+          if (finishGame) {
+            const finishResult = await completeTeamToFinish({
+              team,
+              tasks,
+              completedAt,
+              commentPrefix: "Коригування за групове переведення на фініш"
+            });
+
+            results.push(finishResult);
             continue;
           }
 
@@ -1296,9 +1401,12 @@ router.post(
       }
 
       res.json({
-        message: "Групову дію виконано",
-        target_task_id: targetTask.id,
-        target_task_sort_order: targetTask.sort_order,
+        message: finishGame
+          ? "Команди переведено на фініш"
+          : "Групову дію виконано",
+        finish_game: finishGame,
+        target_task_id: targetTask ? targetTask.id : null,
+        target_task_sort_order: targetTask ? targetTask.sort_order : null,
         results
       });
 
@@ -1307,6 +1415,79 @@ router.post(
 
       res.status(500).json({
         error: "Помилка групового переведення команд"
+      });
+    }
+  }
+);
+
+
+router.post(
+  "/run/:runId/finish-unfinished",
+  requireAuth,
+  async (req, res) => {
+    const runId = req.params.runId;
+
+    try {
+      const run = await getRunById(runId);
+
+      if (!run) {
+        return res.status(404).json({
+          error: "Запуск не знайдено"
+        });
+      }
+
+      if (run.status === "ARCHIVED") {
+        return res.status(409).json({
+          error: "Архівний запуск не можна змінювати"
+        });
+      }
+
+      const tasks = await getTasksForRun(runId);
+      const teams = await dbAll(
+        `
+        SELECT id, name, run_id, finished_at
+        FROM teams
+        WHERE run_id = ?
+          AND finished_at IS NULL
+        ORDER BY name COLLATE NOCASE
+        `,
+        [runId]
+      );
+
+      const completedAt = await getCurrentTimestamp();
+      const results = [];
+
+      await dbRun("BEGIN TRANSACTION");
+
+      try {
+        for (const team of teams) {
+          const finishResult = await completeTeamToFinish({
+            team,
+            tasks,
+            completedAt,
+            commentPrefix: "Коригування за примусове завершення гри"
+          });
+
+          results.push(finishResult);
+        }
+
+        await dbRun("COMMIT");
+      } catch (transactionError) {
+        await dbRun("ROLLBACK");
+        throw transactionError;
+      }
+
+      res.json({
+        message: "Незавершені команди переведено на фініш",
+        finished_count: results.filter(item => item.status === "finished").length,
+        results
+      });
+
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error: "Помилка завершення незавершених команд"
       });
     }
   }

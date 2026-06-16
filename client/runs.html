@@ -138,7 +138,7 @@ function openRun(runId) {
 }
 
 function openStatistics(runId) {
-  window.location.href = `/statistics.html?run=${runId}`;
+  window.open(`/statistics.html?run=${runId}`, "_blank", "noopener");
 }
 
 async function deleteRun(runId) {

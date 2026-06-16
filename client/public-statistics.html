@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Статистика гри</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app public-statistics-page">
+  <div class="card public-statistics-card">
+
+    <h1 id="publicStatisticsTitle">Статистика гри</h1>
+
+    <div id="publicStatisticsMeta" class="public-statistics-meta">
+      Завантаження статистики...
+    </div>
+
+    <div id="publicStatisticsBlock">
+      Завантаження таблиці...
+    </div>
+
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const runCode = String(params.get("run") || "").trim().toUpperCase();
+let currentStatistics = null;
+let currentMode = "detailed";
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function formatDuration(totalSeconds) {
+  if (totalSeconds === null || totalSeconds === undefined) {
+    return "-";
+  }
+
+  const seconds = Math.max(0, Number(totalSeconds) || 0);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const sec = seconds % 60;
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+function formatDateTimeAsSaved(value) {
+  if (!value) {
+    return "-";
+  }
+
+  const text = String(value).trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+
+  if (!match) {
+    return text;
+  }
+
+  const [, year, month, day, hour, minute, second = "00"] = match;
+  return `${day}.${month}.${year}, ${hour}:${minute}:${second}`;
+}
+
+function getTeamBonusSeconds(team) {
+  return Number(team.total_bonus_seconds) || 0;
+}
+
+function getTeamPenaltySeconds(team) {
+  return Number(team.total_penalty_seconds) || 0;
+}
+
+function getFullTimeSeconds(team) {
+  return team.full_time_seconds === null || team.full_time_seconds === undefined
+    ? null
+    : Number(team.full_time_seconds);
+}
+
+function getGameTimeSeconds(team) {
+  const fullTime = getFullTimeSeconds(team);
+
+  if (fullTime === null) {
+    return null;
+  }
+
+  const bonus = getTeamBonusSeconds(team);
+  const penalty = getTeamPenaltySeconds(team);
+
+  return Math.max(0, fullTime - bonus + penalty);
+}
+
+function formatTaskCell(task) {
+  if (!task.cell || task.cell.status === "not_started") {
+    return `<div class="stat-empty">-</div>`;
+  }
+
+  if (task.cell.status === "in_progress") {
+    return `<div class="task-main-time in-progress-text">в процесі</div>`;
+  }
+
+  return `
+    <div class="task-main-time">
+      ${escapeHtml(formatDuration(task.cell.duration_seconds))}
+    </div>
+  `;
+}
+
+function formatBonusPenalty(team) {
+  const bonus = getTeamBonusSeconds(team);
+  const penalty = getTeamPenaltySeconds(team);
+
+  if (!bonus && !penalty) {
+    return "-";
+  }
+
+  const total = penalty - bonus;
+  const totalClass = total <= 0 ? "stat-bonus" : "stat-penalty";
+  const totalSign = total <= 0 ? "-" : "+";
+  const details = [];
+
+  if (bonus) {
+    details.push(`<span class="stat-bonus-small">-${formatDuration(bonus)}</span>`);
+  }
+
+  if (penalty) {
+    details.push(`<span class="stat-penalty-small">+${formatDuration(penalty)}</span>`);
+  }
+
+  return `
+    <div class="${totalClass}">
+      ${totalSign}${formatDuration(Math.abs(total))}
+    </div>
+    <div class="bonus-penalty-details">
+      (${details.join(", ")})
+    </div>
+  `;
+}
+
+function prepareRanking(teams) {
+  const finishedTeams = teams
+    .filter(team => getGameTimeSeconds(team) !== null)
+    .sort((a, b) => getGameTimeSeconds(a) - getGameTimeSeconds(b));
+
+  finishedTeams.forEach((team, index) => {
+    team.place = index + 1;
+
+    if (index === 0) {
+      team.gap_from_previous_seconds = null;
+      team.gap_from_first_seconds = null;
+      return;
+    }
+
+    const previous = finishedTeams[index - 1];
+    const first = finishedTeams[0];
+
+    team.gap_from_previous_seconds = getGameTimeSeconds(team) - getGameTimeSeconds(previous);
+    team.gap_from_first_seconds = getGameTimeSeconds(team) - getGameTimeSeconds(first);
+  });
+
+  const unfinishedTeams = teams
+    .filter(team => getGameTimeSeconds(team) === null)
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "uk"));
+
+  unfinishedTeams.forEach(team => {
+    team.place = null;
+    team.gap_from_previous_seconds = null;
+    team.gap_from_first_seconds = null;
+  });
+
+  return [...finishedTeams, ...unfinishedTeams];
+}
+
+function renderModeButtons() {
+  return `
+    <div class="public-statistics-view-toggle" role="group" aria-label="Режим відображення статистики">
+      <button type="button" class="toggle-btn ${currentMode === "detailed" ? "active" : ""}" data-mode="detailed">Детально</button>
+      <button type="button" class="toggle-btn ${currentMode === "brief" ? "active" : ""}" data-mode="brief">Стисло</button>
+    </div>
+  `;
+}
+
+function renderDetailedTable(teams, tasks) {
+  return `
+    <div class="statistics-table-wrapper public-statistics-table-wrapper">
+      <table class="statistics-table public-statistics-table">
+        <thead>
+          <tr>
+            <th>Команда</th>
+            <th>Старт</th>
+
+            ${tasks.map(task => `
+              <th>
+                Завдання ${task.sort_order}<br>
+                <small>${escapeHtml(task.title)}</small>
+              </th>
+            `).join("")}
+
+            <th>Від старту<br>до фінішу</th>
+            <th>Бонуси /<br>штрафи</th>
+            <th>Ігровий час</th>
+            <th>Відставання від<br>попередньої</th>
+            <th>Відставання від<br>першої</th>
+            <th>Місце</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${teams.map(team => {
+            const fullTime = getFullTimeSeconds(team);
+            const gameTime = getGameTimeSeconds(team);
+
+            return `
+              <tr>
+                <td class="team-name-cell"><strong>${escapeHtml(team.name)}</strong></td>
+
+                <td class="time-stat-cell">${escapeHtml(team.started_at_display || "-")}</td>
+
+                ${(team.tasks || []).map(task => `
+                  <td class="task-stat-cell ${escapeHtml(task.cell?.status || "not_started")}">
+                    ${formatTaskCell(task)}
+                  </td>
+                `).join("")}
+
+                <td class="time-stat-cell">${escapeHtml(formatDuration(fullTime))}</td>
+                <td class="time-stat-cell">${formatBonusPenalty(team)}</td>
+                <td class="time-stat-cell main-time-cell">${escapeHtml(formatDuration(gameTime))}</td>
+
+                <td class="time-stat-cell">
+                  ${team.gap_from_previous_seconds === null ? "-" : escapeHtml(formatDuration(team.gap_from_previous_seconds))}
+                </td>
+
+                <td class="time-stat-cell">
+                  ${team.gap_from_first_seconds === null ? "-" : escapeHtml(formatDuration(team.gap_from_first_seconds))}
+                </td>
+
+                <td class="place-cell">${team.place ? `${team.place}` : "-"}</td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderBriefTable(teams) {
+  return `
+    <div class="statistics-table-wrapper public-statistics-table-wrapper">
+      <table class="statistics-table public-statistics-table public-statistics-brief-table">
+        <thead>
+          <tr>
+            <th>Команда</th>
+            <th>Ігровий час</th>
+            <th>Відставання від попередньої</th>
+            <th>Відставання від першої</th>
+            <th>Місце</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${teams.map(team => {
+            const gameTime = getGameTimeSeconds(team);
+
+            return `
+              <tr>
+                <td class="team-name-cell"><strong>${escapeHtml(team.name)}</strong></td>
+                <td class="time-stat-cell main-time-cell">${escapeHtml(formatDuration(gameTime))}</td>
+                <td class="time-stat-cell">
+                  ${team.gap_from_previous_seconds === null ? "-" : escapeHtml(formatDuration(team.gap_from_previous_seconds))}
+                </td>
+                <td class="time-stat-cell">
+                  ${team.gap_from_first_seconds === null ? "-" : escapeHtml(formatDuration(team.gap_from_first_seconds))}
+                </td>
+                <td class="place-cell">${team.place ? `${team.place}` : "-"}</td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderPublicStatistics(statistics) {
+  currentStatistics = statistics;
+
+  const run = statistics.run || {};
+  const teams = prepareRanking(statistics.teams || []);
+  const tasks = teams[0]?.tasks || [];
+
+  document.getElementById("publicStatisticsTitle").textContent =
+    `Статистика «${run.title || "Запуск"}»`;
+
+  document.getElementById("publicStatisticsMeta").innerHTML = `
+    <div><strong>Гра:</strong> ${escapeHtml(run.game_title || "-")}</div>
+    <div><strong>Старт:</strong> ${escapeHtml(formatDateTimeAsSaved(run.started_at))}</div>
+  `;
+
+  const block = document.getElementById("publicStatisticsBlock");
+
+  if (!teams.length) {
+    block.textContent = "У цьому запуску немає команд.";
+    return;
+  }
+
+  block.innerHTML = `
+    ${renderModeButtons()}
+    ${currentMode === "detailed" ? renderDetailedTable(teams, tasks) : renderBriefTable(teams)}
+  `;
+
+  block.querySelectorAll(".toggle-btn").forEach(button => {
+    button.addEventListener("click", () => {
+      currentMode = button.dataset.mode;
+      renderPublicStatistics(currentStatistics);
+    });
+  });
+}
+
+async function loadPublicStatistics() {
+  const meta = document.getElementById("publicStatisticsMeta");
+  const block = document.getElementById("publicStatisticsBlock");
+
+  if (!runCode) {
+    meta.textContent = "Не вказано код запуску.";
+    block.textContent = "Відкрийте сторінку за посиланням, яке видає адміністратор після публікації статистики.";
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `/api/statistics/public/run/${encodeURIComponent(runCode)}?t=${Date.now()}`
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      meta.textContent = result.error || "Помилка завантаження статистики";
+      block.textContent = "";
+      return;
+    }
+
+    renderPublicStatistics(result);
+
+  } catch (error) {
+    console.error(error);
+    meta.textContent = "Помилка з'єднання із сервером";
+    block.textContent = "";
+  }
+}
+
+loadPublicStatistics();
+</script>
+
+</body>
+</html>

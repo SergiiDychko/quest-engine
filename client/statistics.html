@@ -22,11 +22,39 @@
 
       <span id="publishStatisticsMessage"></span>
 
-      <div id="publicLinkBlock" class="hidden">
-        <label>
+      <div id="publicLinkBlock" class="hidden public-link-block">
+        <div class="public-link-title">
           Публічне посилання на статистику
-          <input id="publicStatisticsLink" type="text" readonly>
-        </label>
+        </div>
+
+        <div class="public-link-row">
+          <a
+            id="publicStatisticsLink"
+            class="public-statistics-link"
+            href="#"
+            target="_blank"
+            rel="noopener"
+          ></a>
+
+          <button id="copyPublicStatisticsLinkBtn" type="button">
+            Копіювати
+          </button>
+
+          <span id="publicStatisticsCopyMessage" class="copy-success-message"></span>
+        </div>
+      </div>
+
+      <div id="finishUnfinishedModal" class="modal-backdrop hidden">
+        <div class="modal-card">
+          <h3>Не всі команди завершили гру</h3>
+          <p id="finishUnfinishedModalText"></p>
+          <div class="modal-actions">
+            <button type="button" id="cancelPublishBtn">Скасувати</button>
+            <button type="button" id="forcePublishBtn" class="danger-btn">
+              Усе одно завершити
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -208,18 +236,162 @@ function updateTitle(run) {
     `Адмін.статистика "${title}", ${startedAt}`;
 }
 
+function getUnfinishedTeams() {
+  return currentTeams.filter(team =>
+    getFullTimeSeconds(team) === null || !team.finished_at
+  );
+}
+
+function hideFinishUnfinishedModal() {
+  document
+    .getElementById("finishUnfinishedModal")
+    .classList.add("hidden");
+}
+
+function askFinishUnfinishedTeams(count) {
+  return new Promise(resolve => {
+    const modal = document.getElementById("finishUnfinishedModal");
+    const text = document.getElementById("finishUnfinishedModalText");
+    const cancelBtn = document.getElementById("cancelPublishBtn");
+    const forceBtn = document.getElementById("forcePublishBtn");
+
+    text.textContent = `Ще не завершили гру команд: ${count}. Якщо продовжити, ці команди будуть автоматично переведені на фініш із нарахуванням коригувань часу та можливих штрафів за автопереходи.`;
+
+    const cleanup = value => {
+      cancelBtn.onclick = null;
+      forceBtn.onclick = null;
+      hideFinishUnfinishedModal();
+      resolve(value);
+    };
+
+    cancelBtn.onclick = () => cleanup(false);
+    forceBtn.onclick = () => cleanup(true);
+
+    modal.classList.remove("hidden");
+  });
+}
+
+async function finishUnfinishedTeamsBeforePublish() {
+  const response = await fetch(`/api/statistics/run/${runId}/finish-unfinished`, {
+    method: "POST"
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(result.error || "Помилка завершення незавершених команд");
+  }
+
+  return result;
+}
+
+function getPublicStatisticsUrlFromRun(run) {
+  if (!run?.run_code) {
+    return "";
+  }
+
+  return `${window.location.origin}/public-statistics.html?run=${encodeURIComponent(run.run_code)}`;
+}
+
+async function copyPublicStatisticsLink() {
+  const copyMessage = document.getElementById("publicStatisticsCopyMessage");
+  const publicLink = document.getElementById("publicStatisticsLink");
+  const publicUrl = publicLink?.href || "";
+
+  copyMessage.textContent = "";
+
+  if (!publicUrl || publicUrl.endsWith("#")) {
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(publicUrl);
+    copyMessage.textContent = "посилання скопійоване";
+
+    setTimeout(() => {
+      copyMessage.textContent = "";
+    }, 3000);
+  } catch (error) {
+    copyMessage.textContent = "Не вдалося скопіювати";
+
+    setTimeout(() => {
+      copyMessage.textContent = "";
+    }, 3000);
+  }
+}
+
+function showPublishedStatisticsLink(publicUrl) {
+  const publishButton = document.getElementById("publishStatisticsBtn");
+  const message = document.getElementById("publishStatisticsMessage");
+  const linkBlock = document.getElementById("publicLinkBlock");
+  const publicLink = document.getElementById("publicStatisticsLink");
+
+  message.className = "";
+  message.textContent = "";
+
+  if (publicUrl) {
+    publicLink.href = publicUrl;
+    publicLink.textContent = publicUrl;
+    linkBlock.classList.remove("hidden");
+  }
+
+  publishButton.classList.add("hidden");
+}
+
+function showUnpublishedStatisticsControls() {
+  const publishButton = document.getElementById("publishStatisticsBtn");
+  const linkBlock = document.getElementById("publicLinkBlock");
+
+  publishButton.classList.remove("hidden");
+  linkBlock.classList.add("hidden");
+}
+
+function syncPublishControls() {
+  if (currentRun?.status === "ARCHIVED") {
+    showPublishedStatisticsLink(getPublicStatisticsUrlFromRun(currentRun));
+    return;
+  }
+
+  showUnpublishedStatisticsControls();
+}
+
 async function publishStatistics() {
   if (!currentRun) {
     alert("Статистика ще не завантажена");
     return;
   }
 
-  const confirmed = confirm(
-    `Завершити гру "${currentRun.title}" і опублікувати статистику?\n\nПісля цього запуск буде перенесено в архів, а публічна статистика стане доступною за посиланням.`
-  );
+  const message = document.getElementById("publishStatisticsMessage");
+  message.className = "";
+  message.textContent = "";
 
-  if (!confirmed) {
-    return;
+  const unfinishedTeams = getUnfinishedTeams();
+
+  if (unfinishedTeams.length > 0) {
+    const shouldFinish = await askFinishUnfinishedTeams(unfinishedTeams.length);
+
+    if (!shouldFinish) {
+      return;
+    }
+
+    try {
+      await finishUnfinishedTeamsBeforePublish();
+      await loadStatistics();
+    } catch (error) {
+      message.className = "";
+      message.textContent = error.message || "Помилка завершення незавершених команд";
+      return;
+    }
+  } else {
+    const confirmed = confirm(
+      `Завершити гру "${currentRun.title}" і опублікувати статистику?
+
+Після цього запуск буде перенесено в архів, а публічна статистика стане доступною за посиланням.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
   }
 
   const response = await fetch(`/api/runs/${runId}/publish`, {
@@ -228,33 +400,13 @@ async function publishStatistics() {
 
   const result = await response.json();
 
-  const message = document.getElementById("publishStatisticsMessage");
-  const linkBlock = document.getElementById("publicLinkBlock");
-  const linkInput = document.getElementById("publicStatisticsLink");
-
   if (!response.ok) {
     message.className = "";
     message.textContent = result.error || "Помилка публікації статистики";
     return;
   }
 
-  const publicUrl = result.public_statistics_url || "";
-
-  linkInput.value = publicUrl;
-  linkBlock.classList.remove("hidden");
-
-  if (publicUrl) {
-    await navigator.clipboard.writeText(publicUrl);
-  }
-
-  message.className = "success-message";
-  message.textContent = "✓ Гру завершено, посилання скопійовано";
-
-  setTimeout(() => {
-    message.textContent = "";
-  }, 3000);
-
-  loadStatistics();
+  showPublishedStatisticsLink(result.public_statistics_url || "");
 }
 
 function formatAnswerType(type) {
@@ -386,17 +538,19 @@ function updateBulkActionsState() {
 
 async function moveSelectedTeams() {
   const teamIds = getCheckedTeamIds();
-  const targetTaskId = Number(
-    document.getElementById("bulkTargetTaskSelect")?.value
-  ) || 0;
+  const targetValue = String(
+    document.getElementById("bulkTargetTaskSelect")?.value || ""
+  );
+  const finishGame = targetValue === "FINISH";
+  const targetTaskId = finishGame ? 0 : Number(targetValue) || 0;
 
   if (!teamIds.length) {
     alert("Оберіть хоча б одну команду");
     return;
   }
 
-  if (!targetTaskId) {
-    alert("Оберіть завдання");
+  if (!finishGame && !targetTaskId) {
+    alert("Оберіть завдання або фініш");
     return;
   }
 
@@ -405,7 +559,9 @@ async function moveSelectedTeams() {
   );
 
   const confirmed = confirm(
-    `Перевести обрані команди (${teamIds.length}) на завдання №${targetTask?.sort_order || "?"}?`
+    finishGame
+      ? `Перевести обрані команди (${teamIds.length}) на фініш гри?`
+      : `Перевести обрані команди (${teamIds.length}) на завдання №${targetTask?.sort_order || "?"}?`
   );
 
   if (!confirmed) {
@@ -421,7 +577,8 @@ async function moveSelectedTeams() {
       },
       body: JSON.stringify({
         teamIds,
-        targetTaskId
+        targetTaskId,
+        finishGame
       })
     }
   );
@@ -434,6 +591,10 @@ async function moveSelectedTeams() {
     return;
   }
 
+  const finishedCount = (result.results || [])
+    .filter(item => item.status === "finished")
+    .length;
+
   const movedCount = (result.results || [])
     .filter(item => item.status === "moved")
     .length;
@@ -443,7 +604,13 @@ async function moveSelectedTeams() {
     .length;
 
   alert(
-    `Групову дію виконано.\nПереведено: ${movedCount}\nПропущено: ${skippedCount}`
+    finishGame
+      ? `Групову дію виконано.
+Переведено на фініш: ${finishedCount}
+Пропущено: ${skippedCount}`
+      : `Групову дію виконано.
+Переведено: ${movedCount}
+Пропущено: ${skippedCount}`
   );
 
   selectedTeamIds = new Set(teamIds);
@@ -1035,6 +1202,7 @@ async function loadStatistics() {
 
   if (currentRun) {
     updateTitle(currentRun);
+    syncPublishControls();
   }
 
   const rawTeams = result.teams || [];
@@ -1062,12 +1230,13 @@ async function loadStatistics() {
       </button>
 
       <select id="bulkTargetTaskSelect">
-        <option value="">Оберіть завдання</option>
+        <option value="">Оберіть завдання або фініш</option>
         ${tasks.map(task => `
           <option value="${task.id}">
             Завдання ${task.sort_order}: ${escapeHtml(task.title)}
           </option>
         `).join("")}
+        <option value="FINISH">Фініш</option>
       </select>
 
       <button
@@ -1203,6 +1372,10 @@ async function loadStatistics() {
 document
   .getElementById("publishStatisticsBtn")
   .addEventListener("click", publishStatistics);
+
+document
+  .getElementById("copyPublicStatisticsLinkBtn")
+  .addEventListener("click", copyPublicStatisticsLink);
 
 loadStatistics();
 </script>
