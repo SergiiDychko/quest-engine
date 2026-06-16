@@ -45,6 +45,8 @@ const runId = params.get("run");
 
 let currentRun = null;
 let currentTeams = [];
+let currentTasks = [];
+let selectedTeamIds = new Set();
 let selectedCell = {
   teamId: null,
   taskId: null
@@ -344,6 +346,108 @@ function getSelectedCellClass(team, task) {
   }
 
   return classes.join(" ");
+}
+
+
+function getCheckedTeamIds() {
+  return Array.from(
+    document.querySelectorAll(".team-bulk-checkbox:checked")
+  ).map(input => Number(input.value)).filter(Boolean);
+}
+
+function syncSelectedTeamsFromCheckboxes() {
+  selectedTeamIds = new Set(getCheckedTeamIds());
+  updateBulkActionsState();
+}
+
+function toggleAllTeams(checked) {
+  document
+    .querySelectorAll(".team-bulk-checkbox")
+    .forEach(input => {
+      input.checked = checked;
+    });
+
+  syncSelectedTeamsFromCheckboxes();
+}
+
+function updateBulkActionsState() {
+  const selectedCount = selectedTeamIds.size;
+  const selectedCountEl = document.getElementById("selectedTeamsCount");
+  const moveBtn = document.getElementById("moveSelectedTeamsBtn");
+
+  if (selectedCountEl) {
+    selectedCountEl.textContent = `Обрано команд: ${selectedCount}`;
+  }
+
+  if (moveBtn) {
+    moveBtn.disabled = selectedCount === 0;
+  }
+}
+
+async function moveSelectedTeams() {
+  const teamIds = getCheckedTeamIds();
+  const targetTaskId = Number(
+    document.getElementById("bulkTargetTaskSelect")?.value
+  ) || 0;
+
+  if (!teamIds.length) {
+    alert("Оберіть хоча б одну команду");
+    return;
+  }
+
+  if (!targetTaskId) {
+    alert("Оберіть завдання");
+    return;
+  }
+
+  const targetTask = currentTasks.find(
+    task => Number(task.id) === Number(targetTaskId)
+  );
+
+  const confirmed = confirm(
+    `Перевести обрані команди (${teamIds.length}) на завдання №${targetTask?.sort_order || "?"}?`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const response = await fetch(
+    `/api/statistics/run/${runId}/move-teams`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        teamIds,
+        targetTaskId
+      })
+    }
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    alert(result.error || "Помилка групової дії");
+    await loadStatistics();
+    return;
+  }
+
+  const movedCount = (result.results || [])
+    .filter(item => item.status === "moved")
+    .length;
+
+  const skippedCount = (result.results || [])
+    .filter(item => item.status === "skipped")
+    .length;
+
+  alert(
+    `Групову дію виконано.\nПереведено: ${movedCount}\nПропущено: ${skippedCount}`
+  );
+
+  selectedTeamIds = new Set(teamIds);
+  await loadStatistics();
 }
 
 function refreshStatisticsTableHighlight() {
@@ -938,17 +1042,57 @@ async function loadStatistics() {
   currentTeams = teams;
 
   const tasks = teams[0]?.tasks || [];
+  currentTasks = tasks;
 
   if (!teams.length) {
     block.textContent = "Команд поки немає.";
     return;
   }
 
+  const bulkActionsHtml = `
+    <div class="bulk-actions-panel">
+      <strong>Групові дії адміністратора</strong>
+
+      <button type="button" onclick="toggleAllTeams(true)">
+        Обрати всі
+      </button>
+
+      <button type="button" onclick="toggleAllTeams(false)">
+        Зняти всі
+      </button>
+
+      <select id="bulkTargetTaskSelect">
+        <option value="">Оберіть завдання</option>
+        ${tasks.map(task => `
+          <option value="${task.id}">
+            Завдання ${task.sort_order}: ${escapeHtml(task.title)}
+          </option>
+        `).join("")}
+      </select>
+
+      <button
+        type="button"
+        id="moveSelectedTeamsBtn"
+        onclick="moveSelectedTeams()"
+        disabled
+      >
+        Перевести вибрані команди
+      </button>
+
+      <span id="selectedTeamsCount" class="muted-text">
+        Обрано команд: 0
+      </span>
+    </div>
+  `;
+
   block.innerHTML = `
+    ${bulkActionsHtml}
+
     <div class="statistics-table-wrapper">
       <table class="statistics-table">
         <thead>
           <tr>
+            <th>✓</th>
             <th>Команда</th>
 
             <th>Час старту</th>
@@ -977,6 +1121,17 @@ async function loadStatistics() {
 
             return `
               <tr>
+                <td>
+                  <input
+                    type="checkbox"
+                    class="team-bulk-checkbox"
+                    value="${team.id}"
+                    ${selectedTeamIds.has(Number(team.id)) ? "checked" : ""}
+                    onchange="syncSelectedTeamsFromCheckboxes()"
+                    aria-label="Обрати команду ${escapeHtml(team.name)}"
+                  >
+                </td>
+
                 <td>
                   <strong>${escapeHtml(team.name)}</strong>
                 </td>
@@ -1041,6 +1196,8 @@ async function loadStatistics() {
       </table>
     </div>
   `;
+
+  updateBulkActionsState();
 }
 
 document

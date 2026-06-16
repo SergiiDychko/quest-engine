@@ -802,3 +802,24 @@ th.selected-stat-column-cell {
 .clickable-stat-cell:hover {
   background: #eef6ff;
 }
+.bulk-actions-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.bulk-actions-panel select {
+  min-width: 220px;
+}
+
+.team-bulk-checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
