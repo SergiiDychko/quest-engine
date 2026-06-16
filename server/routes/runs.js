@@ -152,6 +152,35 @@ router.get("/archive/game/:gameId", requireAuth, (req, res) => {
   );
 });
 
+
+router.get("/archive", requireAuth, (req, res) => {
+  db.all(
+    `
+    SELECT
+      game_runs.id,
+      game_runs.title,
+      games.title AS game_title,
+      game_runs.status,
+      game_runs.started_at,
+      game_runs.finished_at
+    FROM game_runs
+    JOIN games ON games.id = game_runs.game_id
+    WHERE game_runs.status = 'ARCHIVED'
+    ORDER BY game_runs.started_at DESC
+    `,
+    [],
+    (error, runs) => {
+      if (error) {
+        return res.status(500).json({
+          error: "Помилка отримання архіву всіх запусків"
+        });
+      }
+
+      res.json({ runs });
+    }
+  );
+});
+
 router.get("/:id", requireAuth, (req, res) => {
   const runId = req.params.id;
 

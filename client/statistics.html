@@ -11,8 +11,6 @@
 <div class="app">
   <div class="card">
 
-    <a href="javascript:history.back()">← Назад</a>
-
     <h1 id="statisticsTitle">Адмін.статистика</h1>
 
     <div id="publishStatisticsBlock" class="publish-statistics-block hidden">
@@ -75,6 +73,10 @@ let currentRun = null;
 let currentTeams = [];
 let currentTasks = [];
 let selectedTeamIds = new Set();
+
+function isRunArchived() {
+  return currentRun?.status === "ARCHIVED";
+}
 let selectedCell = {
   teamId: null,
   taskId: null
@@ -407,6 +409,11 @@ async function publishStatistics() {
   }
 
   showPublishedStatisticsLink(result.public_statistics_url || "");
+
+  // Після публікації запуск стає архівним, тому одразу
+  // перерендерюємо статистику в режимі перегляду без групових дій
+  // і без чекбоксів біля команд.
+  await loadStatistics();
 }
 
 function formatAnswerType(type) {
@@ -1217,7 +1224,9 @@ async function loadStatistics() {
     return;
   }
 
-  const bulkActionsHtml = `
+  const bulkActionsHtml = isRunArchived()
+    ? ""
+    : `
     <div class="bulk-actions-panel">
       <strong>Групові дії адміністратора</strong>
 
@@ -1261,7 +1270,7 @@ async function loadStatistics() {
       <table class="statistics-table">
         <thead>
           <tr>
-            <th>✓</th>
+            ${!isRunArchived() ? "<th>✓</th>" : ""}
             <th>Команда</th>
 
             <th>Час старту</th>
@@ -1290,6 +1299,7 @@ async function loadStatistics() {
 
             return `
               <tr>
+                ${!isRunArchived() ? `
                 <td>
                   <input
                     type="checkbox"
@@ -1300,6 +1310,7 @@ async function loadStatistics() {
                     aria-label="Обрати команду ${escapeHtml(team.name)}"
                   >
                 </td>
+                ` : ""}
 
                 <td>
                   <strong>${escapeHtml(team.name)}</strong>

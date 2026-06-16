@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Архів запусків гри</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+  <div class="card">
+
+    <a href="javascript:history.back()">← Назад</a>
+
+    <h1 id="pageTitle">Архів запусків гри</h1>
+
+    <div class="info-block">
+      <table class="codes-table">
+        <thead>
+          <tr>
+            <th>Назва запуску</th>
+            <th>Старт</th>
+            <th>Завершення</th>
+            <th>Статус</th>
+            <th>Статистика</th>
+          </tr>
+        </thead>
+
+        <tbody id="archiveRunsTableBody">
+          <tr>
+            <td colspan="5">Завантаження...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const gameId = params.get("id");
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+async function loadGameTitle() {
+  if (!gameId) return;
+
+  const response = await fetch(`/api/games/${gameId}`);
+  const result = await response.json();
+
+  if (!response.ok || !result.game) return;
+
+  document.getElementById("pageTitle").textContent =
+    `Архів запусків: ${result.game.title}`;
+}
+
+async function loadArchiveRuns() {
+  const tableBody = document.getElementById("archiveRunsTableBody");
+
+  if (!gameId) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5">Не вказано гру</td>
+      </tr>
+    `;
+    return;
+  }
+
+  const response = await fetch(`/api/runs/archive/game/${gameId}`);
+  const result = await response.json();
+
+  if (!response.ok) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5">
+          ${escapeHtml(result.error || "Помилка завантаження архіву")}
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  if (!result.runs.length) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5">Архівних запусків поки немає</td>
+      </tr>
+    `;
+    return;
+  }
+
+  tableBody.innerHTML = result.runs.map(run => `
+    <tr>
+      <td>${escapeHtml(run.title)}</td>
+      <td>${escapeHtml(run.started_at || "-")}</td>
+      <td>${escapeHtml(run.finished_at || "-")}</td>
+      <td>${escapeHtml(run.status)}</td>
+      <td>
+        <button onclick="openStatistics(${run.id})">
+          Статистика
+        </button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+function openStatistics(runId) {
+  window.open(`/statistics.html?run=${runId}`, "_blank", "noopener");
+}
+
+loadGameTitle();
+loadArchiveRuns();
+</script>
+
+</body>
+</html>

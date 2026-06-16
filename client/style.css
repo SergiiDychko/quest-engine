@@ -644,6 +644,8 @@ input[type="number"] {
 
 .statistics-table th {
   font-size: 15px;
+  text-align: center;
+  background: #f1f5f9;
 }
 
 .statistics-table th small {
@@ -696,8 +698,7 @@ input[type="number"] {
   font-weight: 400;
 }
 
-.statistics-table td:first-child,
-.statistics-table th:first-child {
+.statistics-table td:first-child {
   text-align: left;
   position: sticky;
   left: 0;
@@ -706,8 +707,15 @@ input[type="number"] {
 }
 
 .statistics-table th:first-child {
+  text-align: center;
+  position: sticky;
+  left: 0;
   background: #f1f5f9;
   z-index: 3;
+}
+
+.statistics-table td:first-child:has(.team-bulk-checkbox) {
+  text-align: center;
 }
 
 .task-stat-cell {
@@ -904,9 +912,13 @@ th.selected-stat-column-cell {
   background: #f1f5f9;
 }
 
-.public-statistics-table .team-name-cell,
-.public-statistics-table th:first-child {
+.public-statistics-table .team-name-cell {
   text-align: left;
+  min-width: 180px;
+}
+
+.public-statistics-table th:first-child {
+  text-align: center;
   min-width: 180px;
 }
 
@@ -921,9 +933,14 @@ th.selected-stat-column-cell {
   min-width: 260px;
 }
 
+.public-statistics-brief-table th:first-child {
+  text-align: center;
+}
+
 
 .public-link-block {
   margin-top: 14px;
+  margin-bottom: 22px;
 }
 
 .public-link-title {
@@ -1001,4 +1018,51 @@ th.selected-stat-column-cell {
 
 .danger-btn:hover {
   background: #991b1b;
+}
+
+.admin-user-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.admin-user-row p {
+  margin: 0;
+}
+
+.all-runs-archive-block {
+  margin: 16px 0;
+  padding: 14px;
+  border: 2px solid #94a3b8;
+  background: #f8fafc;
+}
+
+.all-runs-archive-block h2 {
+  margin-bottom: 6px;
+}
+
+.all-runs-archive-block p {
+  margin-top: 0;
+  color: #475569;
+}
+
+.large-action-btn {
+  padding: 8px 14px;
+  font-weight: 700;
+}
+
+/* Фінальні дрібні правки статистики */
+.statistics-table th {
+  text-align: center;
+  background: #f1f5f9;
+}
+
+.statistics-table th:first-child {
+  background: #f1f5f9;
+}
+
+.public-statistics-table th:first-child {
+  text-align: center;
 }
