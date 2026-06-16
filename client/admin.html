@@ -10,54 +10,85 @@
   <main class="app">
     <section class="card">
       <h1>Quest Engine</h1>
+
       <div class="admin-user-row">
         <p id="userInfo">Перевіряємо авторизацію...</p>
-        <button id="logoutBtn">Вийти</button>
+        <div class="admin-user-actions">
+          <a href="/profile.html">
+            <button type="button">Редагувати профіль</button>
+          </a>
+          <button id="logoutBtn" type="button">Вийти</button>
+        </div>
       </div>
 
-      <div class="info-block all-runs-archive-block">
-        <h2>Архів усіх запусків</h2>
-        <p>Переглянути архівні запуски всіх ігор в одній таблиці.</p>
-        <a href="/all-runs-archive.html">
-          <button class="large-action-btn">Переглянути архів усіх запусків</button>
-        </a>
+      <div class="admin-dashboard-block">
+        <h2>Запуски ігор</h2>
+        <p>Планування запусків, перегляд активних запусків і архіву.</p>
+        <div class="admin-dashboard-actions">
+          <a href="/schedule-run.html">
+            <button class="large-action-btn" type="button">Запланувати запуск</button>
+          </a>
+          <a href="/all-active-runs.html">
+            <button class="large-action-btn" type="button">Усі актуальні запуски</button>
+          </a>
+          <a href="/all-runs-archive.html">
+            <button class="large-action-btn" type="button">Архів усіх запусків</button>
+          </a>
+        </div>
       </div>
 
-      <hr />
+      <div class="admin-dashboard-block">
+        <h2>Ігри</h2>
+        <p>Створення, редагування та перегляд каталогу ігор.</p>
+        <div class="admin-dashboard-actions">
+          <button id="showCreateGameBtn" class="large-action-btn" type="button">Створити гру</button>
+          <a href="/games-catalog.html">
+            <button class="large-action-btn" type="button">Каталог ігор</button>
+          </a>
+        </div>
+      </div>
 
-      <h2>Створити гру</h2>
+      <div id="createGameBlock" class="info-block hidden">
+        <h2>Створити гру</h2>
 
-      <input id="gameTitle" type="text" placeholder="Назва гри" />
-      <input id="gameDescription" type="text" placeholder="Короткий опис" />
+        <input id="gameTitle" type="text" placeholder="Назва гри" />
+        <input id="gameDescription" type="text" placeholder="Короткий опис" />
 
-      <select id="gameLanguage">
-        <option value="uk">Українська</option>
-        <option value="en">English</option>
-      </select>
+        <select id="gameLanguage">
+          <option value="uk">Українська</option>
+          <option value="en">English</option>
+        </select>
 
-      <select id="gameType">
-        <option value="LINEAR">LINEAR — лінійний квест</option>
-        <option value="STORM">STORM — штурм</option>
-        <option value="CUSTOM">CUSTOM — кастомна логіка</option>
-      </select>
+        <select id="gameType">
+          <option value="LINEAR">LINEAR — лінійний квест</option>
+          <option value="STORM">STORM — штурм</option>
+          <option value="CUSTOM">CUSTOM — кастомна логіка</option>
+        </select>
 
-      <select id="winnerType">
-        <option value="TIME">TIME — переможець за часом</option>
-        <option value="POINTS">POINTS — переможець за балами</option>
-      </select>
+        <select id="winnerType">
+          <option value="TIME">TIME — переможець за часом</option>
+          <option value="POINTS">POINTS — переможець за балами</option>
+        </select>
 
-      <button id="createGameBtn">Створити гру</button>
+        <button id="createGameBtn" type="button">Створити гру</button>
+        <p id="message"></p>
+      </div>
 
-      <p id="message"></p>
-
-      <hr />
-
-      <h2>Мої ігри</h2>
-      <div id="gamesList">Завантаження...</div>
+      <div id="usersAndRolesBlock" class="admin-dashboard-block hidden">
+        <h2>Користувачі і ролі</h2>
+        <p>Керування користувачами, ролями та доступами.</p>
+        <div class="admin-dashboard-actions">
+          <a href="/users.html">
+            <button class="large-action-btn" type="button">Користувачі</button>
+          </a>
+        </div>
+      </div>
     </section>
   </main>
 
   <script>
+    let currentUser = null;
+
     async function checkAuth() {
       const response = await fetch("/api/auth/me");
       const result = await response.json();
@@ -67,50 +98,22 @@
         return null;
       }
 
+      currentUser = result.user;
+
       document.getElementById("userInfo").textContent =
         `Ви увійшли як: ${result.user.name} (${result.user.role})`;
+
+      if (result.user.role === "ADMIN") {
+        document.getElementById("usersAndRolesBlock").classList.remove("hidden");
+      }
 
       return result.user;
     }
 
-    async function loadGames() {
-      const response = await fetch("/api/games");
-      const result = await response.json();
-
-      const gamesList = document.getElementById("gamesList");
-
-      if (!response.ok) {
-        gamesList.textContent = result.error || "Помилка завантаження ігор";
-        return;
-      }
-
-      if (!result.games.length) {
-        gamesList.textContent = "Ігор поки немає.";
-        return;
-      }
-
-      gamesList.innerHTML = result.games.map(game => `
-        <div class="info-block">
-          <h3>${game.title}</h3>
-          <p>${game.description || ""}</p>
-          <p>
-            Статус: <strong>${game.status}</strong><br>
-            Механіка: <strong>${game.game_type}</strong><br>
-            Переможець: <strong>${game.winner_type}</strong><br>
-            Мова: <strong>${game.language}</strong>
-          </p>
-          <p>
-  <a href="/game.html?id=${game.id}">
-    <button>Редагувати гру</button>
-  </a>
-
-  <a href="/runs.html?id=${game.id}">
-    <button>Переглянути запуски</button>
-  </a>
-</p>
-        </div>
-      `).join("");
-    }
+    document.getElementById("showCreateGameBtn").addEventListener("click", () => {
+      document.getElementById("createGameBlock").classList.toggle("hidden");
+      document.getElementById("gameTitle").focus();
+    });
 
     document.getElementById("createGameBtn").addEventListener("click", async () => {
       const payload = {
@@ -132,16 +135,13 @@
       const result = await response.json();
 
       if (!response.ok) {
+        document.getElementById("message").className = "";
         document.getElementById("message").textContent =
           result.error || "Помилка створення гри";
         return;
       }
 
-      document.getElementById("message").textContent = "Гру створено";
-      document.getElementById("gameTitle").value = "";
-      document.getElementById("gameDescription").value = "";
-
-      loadGames();
+      window.location.href = `/game.html?id=${result.game.id}`;
     });
 
     document.getElementById("logoutBtn").addEventListener("click", async () => {
@@ -149,7 +149,7 @@
       window.location.href = "/login.html";
     });
 
-    checkAuth().then(() => loadGames());
+    checkAuth();
   </script>
 </body>
 </html>

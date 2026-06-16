@@ -180,40 +180,54 @@ document.getElementById("taskTypeSelect").value =
   renderAutoTransition();
 }
 
-document.getElementById("saveTaskNameBtn").addEventListener("click", async () => {
+async function saveTaskHeader(options = {}) {
   const title = document.getElementById("taskNameInput").value.trim();
 
   if (!title) {
-    alert("Вкажіть назву завдання");
-    return;
+    if (!options.silent) {
+      alert("Вкажіть назву завдання");
+    }
+    return { ok: false, error: "Вкажіть назву завдання" };
   }
 
   const response = await fetch(`/api/tasks/${taskId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-  title,
-  task_type:
-    document.getElementById("taskTypeSelect").value
-})
+      title,
+      task_type: document.getElementById("taskTypeSelect").value
+    })
   });
 
   const result = await response.json();
   const message = document.getElementById("saveTaskNameMessage");
 
-  if (response.ok) {
+  if (!response.ok) {
+    if (!options.silent) {
+      message.className = "";
+      message.textContent = result.error;
+    }
+    return { ok: false, error: result.error || "Помилка збереження завдання" };
+  }
+
+  if (!options.silent) {
     message.className = "success-message";
     message.textContent = "✓ Назву збережено";
 
     setTimeout(() => {
       message.textContent = "";
     }, 3000);
-  } else {
-    message.className = "";
-    message.textContent = result.error;
   }
 
-  loadTask();
+  if (!options.skipReload) {
+    await loadTask();
+  }
+
+  return { ok: true };
+}
+
+document.getElementById("saveTaskNameBtn").addEventListener("click", async () => {
+  await saveTaskHeader();
 });
 
 document
@@ -646,6 +660,148 @@ document.getElementById("saveAutoTransitionBtn").addEventListener("click", async
 
   loadTask();
 });
+
+
+async function saveAllContentItemsSilently() {
+  const items = Array.from(document.querySelectorAll('textarea[id^="content-"]'));
+
+  for (const textarea of items) {
+    const contentId = textarea.id.replace("content-", "");
+    const response = await fetch(`/api/task-content/item/${contentId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: textarea.value })
+    });
+
+    if (!response.ok) {
+      const result = await response.json();
+      return { ok: false, error: result.error || "Помилка збереження контенту" };
+    }
+  }
+
+  return { ok: true };
+}
+
+async function saveAllHintsSilently() {
+  for (const hint of currentHints) {
+    const secondsInput = document.getElementById(`hint-seconds-${hint.id}`);
+    const contentInput = document.getElementById(`hint-content-${hint.id}`);
+
+    if (!secondsInput || !contentInput) {
+      continue;
+    }
+
+    const response = await fetch(`/api/task-hints/${hint.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        show_after_seconds: secondsInput.value,
+        content: contentInput.value
+      })
+    });
+
+    if (!response.ok) {
+      const result = await response.json();
+      return { ok: false, error: result.error || "Помилка збереження підказок" };
+    }
+  }
+
+  return { ok: true };
+}
+
+async function saveAllCodesSilently() {
+  if (!currentAnswers.length) {
+    return { ok: true };
+  }
+
+  const firstAnswerInput = document.querySelector(`[data-id="${currentAnswers[0].id}"][data-field="answer_text"]`);
+
+  if (!firstAnswerInput) {
+    return { ok: true };
+  }
+
+  const answers = currentAnswers.map(answer => {
+    const timeInput = document.querySelector(
+      `[data-id="${answer.id}"][data-field="time_modifier_seconds"]`
+    );
+
+    return {
+      id: answer.id,
+      answer_type: answer.answer_type,
+      answer_text: document.querySelector(`[data-id="${answer.id}"][data-field="answer_text"]`).value,
+      description: document.querySelector(`[data-id="${answer.id}"][data-field="description"]`).value,
+      comment: document.querySelector(`[data-id="${answer.id}"][data-field="comment"]`).value,
+      time_modifier_seconds: timeInput ? timeInput.value : 0
+    };
+  });
+
+  const requiredInput = document.getElementById("requiredMainAnswers");
+
+  const response = await fetch(`/api/tasks/${taskId}/answers`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      required_main_answers: requiredInput ? requiredInput.value : 1,
+      answers
+    })
+  });
+
+  if (!response.ok) {
+    const result = await response.json();
+    return { ok: false, error: result.error || "Помилка збереження кодів" };
+  }
+
+  return { ok: true };
+}
+
+async function saveAutoTransitionSilently() {
+  const enabledInput = document.getElementById("autoTransitionEnabled");
+
+  if (!enabledInput) {
+    return { ok: true };
+  }
+
+  const response = await fetch(`/api/tasks/${taskId}/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      auto_transition_enabled: enabledInput.checked,
+      auto_transition_minutes: document.getElementById("autoTransitionMinutes").value,
+      auto_transition_penalty_seconds: document.getElementById("autoTransitionPenalty").value
+    })
+  });
+
+  if (!response.ok) {
+    const result = await response.json();
+    return { ok: false, error: result.error || "Помилка збереження автопереходу" };
+  }
+
+  return { ok: true };
+}
+
+window.saveTaskChangesFromParent = async function () {
+  const steps = [
+    () => saveTaskHeader({ silent: true, skipReload: true }),
+    saveAllContentItemsSilently,
+    saveAllCodesSilently,
+    saveAllHintsSilently,
+    saveAutoTransitionSilently
+  ];
+
+  for (const step of steps) {
+    const result = await step();
+
+    if (!result.ok) {
+      return result;
+    }
+  }
+
+  await loadTask();
+  await loadContent();
+  await loadHints();
+
+  return { ok: true };
+};
 
 loadTask();
 loadContent();

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Усі актуальні запуски</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <section class="card">
+      <a href="/admin.html">← Назад</a>
+
+      <h1>Усі актуальні запуски</h1>
+
+      <div class="info-block">
+        <table class="codes-table">
+          <thead>
+            <tr>
+              <th>Назва запуску</th>
+              <th>Назва гри</th>
+              <th>Старт</th>
+              <th>Статус</th>
+              <th>Статистика</th>
+              <th>Дії</th>
+            </tr>
+          </thead>
+          <tbody id="runsTableBody">
+            <tr>
+              <td colspan="6">Завантаження...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="time-utils.js"></script>
+  <script>
+    function escapeHtml(text) {
+      return String(text || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    async function checkAuth() {
+      const response = await fetch("/api/auth/me");
+      const result = await response.json();
+
+      if (!response.ok || !result.user) {
+        window.location.href = "/login.html";
+      }
+    }
+
+    async function loadRuns() {
+      const response = await fetch("/api/runs/active");
+      const result = await response.json();
+      const tableBody = document.getElementById("runsTableBody");
+
+      if (!response.ok) {
+        tableBody.innerHTML = `<tr><td colspan="6">${escapeHtml(result.error || "Помилка завантаження")}</td></tr>`;
+        return;
+      }
+
+      const runs = result.runs || [];
+
+      if (!runs.length) {
+        tableBody.innerHTML = '<tr><td colspan="6">Актуальних запусків поки немає.</td></tr>';
+        return;
+      }
+
+      tableBody.innerHTML = runs.map(run => `
+        <tr>
+          <td onclick="openRun(${run.id})" style="cursor:pointer">
+            ${escapeHtml(run.title)}
+          </td>
+          <td>${escapeHtml(run.game_title)}</td>
+          <td>${escapeHtml(QETime.formatLocalDateTimeForList(run.started_at))}</td>
+          <td>${escapeHtml(run.status)}</td>
+          <td>
+            <button onclick="openStatistics(${run.id})" type="button">Статистика</button>
+          </td>
+          <td>
+            <button onclick="openRun(${run.id})" type="button">Редагувати</button>
+            <button onclick="deleteRun(${run.id})" type="button">Видалити</button>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    function openRun(runId) {
+      window.location.href = `/run.html?id=${runId}`;
+    }
+
+    function openStatistics(runId) {
+      window.open(`/statistics.html?run=${runId}`, "_blank", "noopener");
+    }
+
+    async function deleteRun(runId) {
+      const confirmed = confirm("Видалити цей запуск?");
+      if (!confirmed) return;
+
+      const response = await fetch(`/api/runs/${runId}`, {
+        method: "DELETE"
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        alert(result.error || "Помилка видалення");
+        return;
+      }
+
+      loadRuns();
+    }
+
+    async function init() {
+      await checkAuth();
+      await loadRuns();
+    }
+
+    init();
+  </script>
+</body>
+</html>

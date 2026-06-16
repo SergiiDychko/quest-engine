@@ -31,6 +31,118 @@ function buildPublicStatisticsUrl(req, runCode) {
   return `${req.protocol}://${req.get("host")}/public-statistics.html?run=${runCode}`;
 }
 
+
+router.get("/active", requireAuth, (req, res) => {
+  db.all(
+    `
+    SELECT
+      game_runs.id,
+      game_runs.title,
+      games.title AS game_title,
+      game_runs.status,
+      game_runs.started_at,
+      game_runs.finished_at
+    FROM game_runs
+    JOIN games ON games.id = game_runs.game_id
+    WHERE game_runs.status IN ('DRAFT', 'ACTIVE')
+    ORDER BY game_runs.started_at DESC
+    `,
+    [],
+    (error, runs) => {
+      if (error) {
+        return res.status(500).json({
+          error: "Помилка отримання актуальних запусків"
+        });
+      }
+
+      res.json({ runs });
+    }
+  );
+});
+
+router.post("/", requireAuth, (req, res) => {
+  const {
+    game_id,
+    title,
+    started_at
+  } = req.body;
+
+  if (!game_id) {
+    return res.status(400).json({
+      error: "Оберіть гру"
+    });
+  }
+
+  if (!title || !title.trim()) {
+    return res.status(400).json({
+      error: "Вкажіть назву запуску"
+    });
+  }
+
+  db.get(
+    `
+    SELECT id, status
+    FROM games
+    WHERE id = ?
+    `,
+    [game_id],
+    (gameError, game) => {
+      if (gameError) {
+        return res.status(500).json({
+          error: "Помилка перевірки гри"
+        });
+      }
+
+      if (!game) {
+        return res.status(404).json({
+          error: "Гру не знайдено"
+        });
+      }
+
+      if (game.status !== "READY") {
+        return res.status(400).json({
+          error: "Запуск можна створити лише для гри зі статусом READY"
+        });
+      }
+
+      const runCode = generateCode();
+
+      db.run(
+        `
+        INSERT INTO game_runs (
+          game_id,
+          title,
+          run_code,
+          status,
+          created_by,
+          started_at
+        )
+        VALUES (?, ?, ?, 'DRAFT', ?, ?)
+        `,
+        [
+          game_id,
+          title.trim(),
+          runCode,
+          req.session.user.id,
+          started_at || null
+        ],
+        function(error) {
+          if (error) {
+            return res.status(500).json({
+              error: "Помилка створення запуску"
+            });
+          }
+
+          res.json({
+            message: "Запуск створено",
+            runId: this.lastID
+          });
+        }
+      );
+    }
+  );
+});
+
 router.get("/game/:gameId", requireAuth, (req, res) => {
   const gameId = req.params.gameId;
 

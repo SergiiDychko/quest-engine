@@ -1066,3 +1066,109 @@ th.selected-stat-column-cell {
 .public-statistics-table th:first-child {
   text-align: center;
 }
+
+.admin-user-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-dashboard-block {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #94a3b8;
+  background: #f8fafc;
+}
+
+.admin-dashboard-block h2 {
+  margin-bottom: 8px;
+}
+
+.admin-dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.admin-dashboard-actions a {
+  text-decoration: none;
+}
+
+.game-status-block {
+  margin-top: 16px;
+}
+
+.create-run-form select {
+  width: 100%;
+}
+
+/* Редактор гри */
+.game-header-editor {
+  margin: 8px 0 18px;
+}
+
+.game-status-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.game-status-inline label {
+  font-weight: 700;
+}
+
+.game-status-inline select {
+  min-width: 260px;
+}
+
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-weight: 700;
+  cursor: help;
+  border: 1px solid #94a3b8;
+}
+
+.help-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.help-tooltip-text {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 420px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #172033;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  z-index: 20;
+}
+
+.help-tooltip:hover .help-tooltip-text,
+.help-tooltip:focus .help-tooltip-text,
+.help-tooltip:focus-within .help-tooltip-text {
+  opacity: 1;
+  visibility: visible;
+}

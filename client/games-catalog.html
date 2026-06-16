@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Каталог ігор</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <section class="card">
+      <a href="/admin.html">← Назад</a>
+
+      <h1>Каталог ігор</h1>
+
+      <div class="info-block">
+        <table class="codes-table">
+          <thead>
+            <tr>
+              <th>Назва гри</th>
+              <th>Механіка</th>
+              <th>Умова перемоги</th>
+              <th>Кількість завдань</th>
+              <th>Статус</th>
+              <th>Запуски</th>
+            </tr>
+          </thead>
+          <tbody id="gamesTableBody">
+            <tr>
+              <td colspan="6">Завантаження...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function escapeHtml(text) {
+      return String(text || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    async function checkAuth() {
+      const response = await fetch("/api/auth/me");
+      const result = await response.json();
+
+      if (!response.ok || !result.user) {
+        window.location.href = "/login.html";
+      }
+    }
+
+    async function loadGames() {
+      const response = await fetch("/api/games/catalog");
+      const result = await response.json();
+      const tableBody = document.getElementById("gamesTableBody");
+
+      if (!response.ok) {
+        tableBody.innerHTML = `<tr><td colspan="6">${escapeHtml(result.error || "Помилка завантаження")}</td></tr>`;
+        return;
+      }
+
+      const games = result.games || [];
+
+      if (!games.length) {
+        tableBody.innerHTML = '<tr><td colspan="6">Ігор поки немає.</td></tr>';
+        return;
+      }
+
+      tableBody.innerHTML = games.map(game => `
+        <tr>
+          <td onclick="openGame(${game.id})" style="cursor:pointer">
+            <strong>${escapeHtml(game.title)}</strong>
+          </td>
+          <td>${escapeHtml(game.game_type)}</td>
+          <td>${escapeHtml(game.winner_type)}</td>
+          <td>${Number(game.tasks_count || 0)}</td>
+          <td>${escapeHtml(game.status)}</td>
+          <td>
+            <button onclick="openRuns(${game.id})" type="button">Переглянути запуски</button>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    function openGame(gameId) {
+      window.location.href = `/game.html?id=${gameId}`;
+    }
+
+    function openRuns(gameId) {
+      window.location.href = `/runs.html?id=${gameId}`;
+    }
+
+    async function init() {
+      await checkAuth();
+      await loadGames();
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -12,7 +12,24 @@
       <a href="/admin.html">← Назад</a>
 
       <h1 id="gameTitle">Завантаження...</h1>
-      <p id="gameMeta"></p>
+
+      <div class="game-header-editor">
+        <div class="game-status-inline">
+          <label for="gameStatusSelect">Статус</label>
+          <select id="gameStatusSelect">
+            <option value="DRAFT">DRAFT — в розробці</option>
+            <option value="READY">READY — готова до проведення</option>
+          </select>
+          <span class="help-tooltip" tabindex="0" aria-label="READY означає, що гра готова до проведення і може бути обрана для нового запуску.">
+            <span class="help-icon">?</span>
+            <span class="help-tooltip-text">READY означає, що гра готова до проведення і може бути обрана для нового запуску.</span>
+          </span>
+          <button id="saveStatusBtn" type="button">Зберегти статус</button>
+          <span id="saveStatusMessage"></span>
+        </div>
+
+        <p id="gameMeta"></p>
+      </div>
 
       <hr />
 
@@ -80,11 +97,10 @@ async function loadGame() {
   currentGame = result.game;
 
   document.getElementById("gameTitle").textContent = currentGame.title;
+  document.getElementById("gameStatusSelect").value = currentGame.status || "DRAFT";
   document.getElementById("gameMeta").innerHTML = `
-    Статус: <strong>${currentGame.status}</strong><br>
     Механіка: <strong>${currentGame.game_type}</strong><br>
-    Переможець: <strong>${currentGame.winner_type}</strong><br>
-    Мова: <strong>${currentGame.language}</strong>
+    Умова перемоги: <strong>${currentGame.winner_type}</strong>
   `;
 }
 
@@ -223,7 +239,7 @@ function renderSystemPage(pageType) {
       >${escapeHtml(page.custom_css || "")}</textarea>
 
       <div class="save-row">
-        <button id="savePageBtn">Зберегти сторінку</button>
+        <button id="savePageBtn">Зберегти всі зміни на сторінці</button>
         <span id="savePageMessage"></span>
       </div>
     </div>
@@ -235,6 +251,12 @@ function renderSystemPage(pageType) {
 }
 
 async function saveSystemPage(pageType) {
+  const statusSaved = await saveGameStatus({ silent: true });
+
+  if (!statusSaved) {
+    return;
+  }
+
   const payload = {
     title: document.getElementById("pageTitleInput").value.trim(),
     content: document.getElementById("pageContentInput").value,
@@ -258,28 +280,127 @@ async function saveSystemPage(pageType) {
     return;
   }
 
-  message.className = "success-message";
-  message.textContent = "✓ Сторінку збережено";
-
-  setTimeout(() => {
-    message.textContent = "";
-  }, 3000);
-
   await loadPages();
   render();
+
+  const updatedMessage = document.getElementById("savePageMessage");
+  if (updatedMessage) {
+    updatedMessage.className = "success-message";
+    updatedMessage.textContent = "✓ Зміни збережено";
+
+    setTimeout(() => {
+      updatedMessage.textContent = "";
+    }, 3000);
+  }
+}
+
+async function saveGameStatus(options = {}) {
+  const statusSelect = document.getElementById("gameStatusSelect");
+  const message = document.getElementById("saveStatusMessage");
+  const status = statusSelect.value;
+
+  const response = await fetch(`/api/games/${gameId}/status`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ status })
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    message.className = "";
+    message.textContent = result.error || "Помилка збереження статусу";
+    return false;
+  }
+
+  currentGame.status = result.game.status;
+  statusSelect.value = currentGame.status;
+
+  if (!options.silent) {
+    message.className = "success-message";
+    message.textContent = "✓ Статус збережено";
+
+    setTimeout(() => {
+      message.textContent = "";
+    }, 3000);
+  }
+
+  return true;
 }
 
 function renderTaskTab(task) {
   const content = document.getElementById("tabContent");
 
   content.innerHTML = `
-    <iframe
-      class="task-editor-frame"
-      src="/task.html?id=${task.id}&game=${gameId}"
-      title="Редактор завдання"
-    ></iframe>
+    <div class="info-block page-editor-block">
+      <h2>${escapeHtml(task.title || `Завдання ${task.sort_order}`)}</h2>
+
+      <iframe
+        id="taskEditorFrame"
+        class="task-editor-frame"
+        src="/task.html?id=${task.id}&game=${gameId}"
+        title="Редактор завдання"
+      ></iframe>
+
+      <div class="save-row">
+        <button id="saveTaskPageBtn">Зберегти всі зміни на сторінці</button>
+        <span id="saveTaskPageMessage"></span>
+      </div>
+    </div>
   `;
+
+  document.getElementById("saveTaskPageBtn").addEventListener("click", () => {
+    saveTaskPageChanges();
+  });
 }
+
+async function saveTaskPageChanges() {
+  const message = document.getElementById("saveTaskPageMessage");
+  const statusSaved = await saveGameStatus({ silent: true });
+
+  if (!statusSaved) {
+    message.className = "";
+    message.textContent = "Помилка збереження статусу гри";
+    return;
+  }
+
+  const frame = document.getElementById("taskEditorFrame");
+
+  if (
+    frame &&
+    frame.contentWindow &&
+    typeof frame.contentWindow.saveTaskChangesFromParent === "function"
+  ) {
+    const taskSaved = await frame.contentWindow.saveTaskChangesFromParent();
+
+    if (!taskSaved || taskSaved.ok === false) {
+      message.className = "";
+      message.textContent = taskSaved?.error || "Помилка збереження завдання";
+      return;
+    }
+  }
+
+  await loadGame();
+  await loadTasks();
+  await loadPages();
+  render();
+
+  const updatedMessage = document.getElementById("saveTaskPageMessage");
+  if (updatedMessage) {
+    updatedMessage.className = "success-message";
+    updatedMessage.textContent = "✓ Зміни збережено";
+
+    setTimeout(() => {
+      updatedMessage.textContent = "";
+    }, 3000);
+  }
+}
+
+document.getElementById("saveStatusBtn").addEventListener("click", () => {
+  saveGameStatus();
+});
 
 document.getElementById("addTaskBtn").addEventListener("click", async () => {
   const nextNumber = currentTasks.length + 1;

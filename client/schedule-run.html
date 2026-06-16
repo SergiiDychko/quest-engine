@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Запланувати запуск</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <section class="card">
+      <a href="/admin.html">← Назад</a>
+
+      <h1>Запланувати запуск</h1>
+
+      <div class="info-block create-run-form">
+        <label>
+          Гра
+          <select id="gameSelect">
+            <option value="">Завантаження...</option>
+          </select>
+        </label>
+
+        <label>
+          Назва запуску
+          <input
+            id="newRunTitle"
+            type="text"
+            placeholder="Наприклад: Ajax Systems Summer Quest"
+          >
+        </label>
+
+        <label>
+          Дата старту
+          <input id="newRunDate" type="date">
+        </label>
+
+        <label>
+          Час старту
+          <input id="newRunTime" type="time">
+        </label>
+
+        <button id="createRunBtn" type="button">Створити запуск</button>
+        <span id="createRunMessage"></span>
+      </div>
+    </section>
+  </main>
+
+  <script src="time-utils.js"></script>
+  <script>
+    function escapeHtml(text) {
+      return String(text || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    async function checkAuth() {
+      const response = await fetch("/api/auth/me");
+      const result = await response.json();
+
+      if (!response.ok || !result.user) {
+        window.location.href = "/login.html";
+      }
+    }
+
+    async function loadReadyGames() {
+      const response = await fetch("/api/games/ready");
+      const result = await response.json();
+      const select = document.getElementById("gameSelect");
+
+      if (!response.ok) {
+        select.innerHTML = `<option value="">${escapeHtml(result.error || "Помилка завантаження")}</option>`;
+        return;
+      }
+
+      const games = result.games || [];
+
+      if (!games.length) {
+        select.innerHTML = '<option value="">Немає ігор зі статусом READY</option>';
+        return;
+      }
+
+      select.innerHTML = `
+        <option value="">Оберіть гру</option>
+        ${games.map(game => `
+          <option value="${game.id}">${escapeHtml(game.title)}</option>
+        `).join("")}
+      `;
+    }
+
+    document.getElementById("createRunBtn").addEventListener("click", async () => {
+      const gameId = document.getElementById("gameSelect").value;
+      const title = document.getElementById("newRunTitle").value.trim();
+      const date = document.getElementById("newRunDate").value;
+      const time = document.getElementById("newRunTime").value;
+      const message = document.getElementById("createRunMessage");
+
+      message.className = "";
+      message.textContent = "";
+
+      if (!gameId) {
+        alert("Оберіть гру");
+        return;
+      }
+
+      if (!title) {
+        alert("Вкажіть назву запуску");
+        return;
+      }
+
+      if (!date) {
+        alert("Вкажіть дату старту");
+        return;
+      }
+
+      if (!time) {
+        alert("Вкажіть час старту");
+        return;
+      }
+
+      const started_at = QETime.toUtcSqlFromLocalDateTime(date, time);
+
+      const response = await fetch("/api/runs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          game_id: gameId,
+          title,
+          started_at
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        message.className = "";
+        message.textContent = result.error || "Помилка створення запуску";
+        return;
+      }
+
+      window.location.href = `/run.html?id=${result.runId}`;
+    });
+
+    async function init() {
+      await checkAuth();
+      await loadReadyGames();
+    }
+
+    init();
+  </script>
+</body>
+</html>

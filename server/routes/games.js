@@ -11,6 +11,95 @@ function requireAuth(req, res, next) {
   next();
 }
 
+
+router.get("/catalog", requireAuth, (req, res) => {
+  const user = req.session.user;
+
+  let query = `
+    SELECT
+      games.id,
+      games.title,
+      games.status,
+      games.game_type,
+      games.winner_type,
+      COUNT(tasks.id) AS tasks_count
+    FROM games
+    LEFT JOIN tasks ON tasks.game_id = games.id
+    GROUP BY games.id
+    ORDER BY LOWER(games.title) ASC
+  `;
+
+  let params = [];
+
+  if (user.role !== "ADMIN") {
+    query = `
+      SELECT
+        games.id,
+        games.title,
+        games.status,
+        games.game_type,
+        games.winner_type,
+        COUNT(tasks.id) AS tasks_count
+      FROM games
+      LEFT JOIN game_permissions
+        ON game_permissions.game_id = games.id
+      LEFT JOIN tasks ON tasks.game_id = games.id
+      WHERE games.created_by = ?
+         OR game_permissions.user_id = ?
+      GROUP BY games.id
+      ORDER BY LOWER(games.title) ASC
+    `;
+
+    params = [user.id, user.id];
+  }
+
+  db.all(query, params, (error, games) => {
+    if (error) {
+      return res.status(500).json({ error: "Помилка отримання каталогу ігор" });
+    }
+
+    res.json({ games });
+  });
+});
+
+router.get("/ready", requireAuth, (req, res) => {
+  const user = req.session.user;
+
+  let query = `
+    SELECT id, title, status
+    FROM games
+    WHERE status = 'READY'
+    ORDER BY LOWER(title) ASC
+  `;
+
+  let params = [];
+
+  if (user.role !== "ADMIN") {
+    query = `
+      SELECT DISTINCT games.id, games.title, games.status
+      FROM games
+      LEFT JOIN game_permissions
+        ON game_permissions.game_id = games.id
+      WHERE games.status = 'READY'
+        AND (
+          games.created_by = ?
+          OR game_permissions.user_id = ?
+        )
+      ORDER BY LOWER(games.title) ASC
+    `;
+
+    params = [user.id, user.id];
+  }
+
+  db.all(query, params, (error, games) => {
+    if (error) {
+      return res.status(500).json({ error: "Помилка отримання готових ігор" });
+    }
+
+    res.json({ games });
+  });
+});
+
 router.get("/", requireAuth, (req, res) => {
   const user = req.session.user;
 
@@ -115,6 +204,38 @@ router.get("/:id", requireAuth, (req, res) => {
       }
 
       res.json({ game });
+    }
+  );
+});
+
+
+router.put("/:id/status", requireAuth, (req, res) => {
+  const gameId = req.params.id;
+  const { status } = req.body;
+
+  if (!["DRAFT", "READY"].includes(status)) {
+    return res.status(400).json({ error: "Некоректний статус гри" });
+  }
+
+  db.run(
+    `
+    UPDATE games
+    SET
+      status = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+    `,
+    [status, gameId],
+    function(error) {
+      if (error) {
+        return res.status(500).json({ error: "Помилка оновлення статусу гри" });
+      }
+
+      if (!this.changes) {
+        return res.status(404).json({ error: "Гру не знайдено" });
+      }
+
+      res.json({ message: "Статус гри оновлено", game: { id: Number(gameId), status } });
     }
   );
 });
