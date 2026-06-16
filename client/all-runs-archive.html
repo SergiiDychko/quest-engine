@@ -39,6 +39,7 @@
   </div>
 </div>
 
+<script src="time-utils.js"></script>
 <script>
 function escapeHtml(text) {
   return String(text || "")
@@ -78,8 +79,8 @@ async function loadAllArchiveRuns() {
     <tr>
       <td>${escapeHtml(run.title)}</td>
       <td>${escapeHtml(run.game_title || "-")}</td>
-      <td>${escapeHtml(run.started_at || "-")}</td>
-      <td>${escapeHtml(run.finished_at || "-")}</td>
+      <td>${escapeHtml(QETime.formatLocalDateTimeForList(run.started_at))}</td>
+      <td>${escapeHtml(QETime.formatLocalDateTimeForList(run.finished_at))}</td>
       <td>${escapeHtml(run.status)}</td>
       <td>
         <button onclick="openStatistics(${run.id})">

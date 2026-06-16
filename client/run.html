@@ -80,6 +80,7 @@
   </div>
 </div>
 
+<script src="time-utils.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const runId = params.get("id");
@@ -95,23 +96,11 @@ function escapeHtml(text) {
 }
 
 function splitDateTime(value) {
-  if (!value) {
-    return { date: "", time: "" };
-  }
-
-  const parts = value.split(" ");
-  return {
-    date: parts[0] || "",
-    time: parts[1] || ""
-  };
+  return QETime.splitUtcToLocalDateTime(value);
 }
 
 function joinDateTime(date, time) {
-  if (!date || !time) {
-    return null;
-  }
-
-  return `${date} ${time}`;
+  return QETime.toUtcSqlFromLocalDateTime(date, time);
 }
 
 function getJoinUrl() {

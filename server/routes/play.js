@@ -417,7 +417,7 @@ router.get("/:pin", (req, res) => {
     }
 
     if (gameData.started_at && gameData.run_status !== "ACTIVE") {
-      const startDate = new Date(String(gameData.started_at).replace(" ", "T"));
+      const startDate = new Date(String(gameData.started_at).replace(" ", "T") + "Z");
       const now = new Date();
 
       if (!Number.isNaN(startDate.getTime()) && now < startDate) {

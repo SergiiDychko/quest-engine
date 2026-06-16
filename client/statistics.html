@@ -65,6 +65,7 @@
   </div>
 </div>
 
+<script src="time-utils.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const runId = params.get("run");
@@ -145,7 +146,7 @@ function formatTaskCell(task) {
     return `
       <div class="task-main-time in-progress-text">в процесі</div>
       <div class="task-time-details">
-        (${escapeHtml(task.cell.start_time)} — -)
+        (${escapeHtml(QETime.formatLocalTime(task.opened_at))} — -)
       </div>
     `;
   }
@@ -155,7 +156,7 @@ function formatTaskCell(task) {
       ${escapeHtml(formatDuration(task.cell.duration_seconds))}
     </div>
     <div class="task-time-details">
-      (${escapeHtml(task.cell.start_time)} — ${escapeHtml(task.cell.finish_time)})
+      (${escapeHtml(QETime.formatLocalTime(task.opened_at))} — ${escapeHtml(QETime.formatLocalTime(task.completed_at))})
     </div>
   `;
 }
@@ -232,7 +233,7 @@ function prepareRanking(teams) {
 
 function updateTitle(run) {
   const title = run?.title || "Запуск";
-  const startedAt = run?.started_at_display || run?.started_at || "-";
+  const startedAt = QETime.formatLocalDateTime(run?.started_at);
 
   document.getElementById("statisticsTitle").textContent =
     `Адмін.статистика "${title}", ${startedAt}`;
@@ -792,7 +793,7 @@ const adjustments = result.adjustments || [];
             ["Час", "Тип", "Код", "Опис", "Коментар"],
             answer => `
               <tr>
-                <td>${escapeHtml(answer.found_at || "-")}</td>
+                <td>${escapeHtml(QETime.formatLocalDateTime(answer.found_at))}</td>
                 <td>${escapeHtml(formatAnswerType(answer.answer_type))}</td>
                 <td><strong>${escapeHtml(answer.answer_text || "")}</strong></td>
                 <td>${escapeHtml(answer.description || "-")}</td>
@@ -810,7 +811,7 @@ const adjustments = result.adjustments || [];
             ["Час", "Введено", "Статус"],
             item => `
               <tr>
-                <td>${escapeHtml(item.created_at || "-")}</td>
+                <td>${escapeHtml(QETime.formatLocalDateTime(item.created_at))}</td>
                 <td>${escapeHtml(item.answer || "")}</td>
                 <td>
                   ${
@@ -832,7 +833,7 @@ const adjustments = result.adjustments || [];
             ["Час", "Тип", "Значення", "Коментар"],
             item => `
               <tr>
-                <td>${escapeHtml(item.created_at || "-")}</td>
+                <td>${escapeHtml(QETime.formatLocalDateTime(item.created_at))}</td>
                 <td>${escapeHtml(formatAdjustmentType(item.adjustment_type))}</td>
                 <td>${formatAdjustmentValue(item)}</td>
                 <td>${escapeHtml(item.comment || "-")}</td>
@@ -951,7 +952,7 @@ refreshStatisticsTableHighlight();
     </td>
 
     <td>
-      ${escapeHtml(item.created_at || "-")}
+      ${escapeHtml(QETime.formatLocalDateTime(item.created_at))}
     </td>
 
     <td>
@@ -1317,7 +1318,7 @@ async function loadStatistics() {
                 </td>
 
                 <td class="time-stat-cell">
-                  ${escapeHtml(team.started_at_display || "-")}
+                  ${escapeHtml(QETime.formatLocalTime(team.started_at))}
                 </td>
 
                 ${team.tasks.map(task => `
@@ -1333,7 +1334,7 @@ async function loadStatistics() {
                 `).join("")}
 
                 <td class="time-stat-cell">
-                  ${escapeHtml(team.finished_at_display || "-")}
+                  ${escapeHtml(QETime.formatLocalTime(team.statistics_finished_at || team.calculated_finished_at))}
                 </td>
 
                 <td class="time-stat-cell">

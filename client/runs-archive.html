@@ -38,6 +38,7 @@
   </div>
 </div>
 
+<script src="time-utils.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const gameId = params.get("id");
@@ -100,8 +101,8 @@ async function loadArchiveRuns() {
   tableBody.innerHTML = result.runs.map(run => `
     <tr>
       <td>${escapeHtml(run.title)}</td>
-      <td>${escapeHtml(run.started_at || "-")}</td>
-      <td>${escapeHtml(run.finished_at || "-")}</td>
+      <td>${escapeHtml(QETime.formatLocalDateTimeForList(run.started_at))}</td>
+      <td>${escapeHtml(QETime.formatLocalDateTimeForList(run.finished_at))}</td>
       <td>${escapeHtml(run.status)}</td>
       <td>
         <button onclick="openStatistics(${run.id})">

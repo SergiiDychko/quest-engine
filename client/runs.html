@@ -66,6 +66,7 @@
   </div>
 </div>
 
+<script src="time-utils.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const gameId = params.get("id");
@@ -111,7 +112,7 @@ async function loadRuns() {
       </td>
 
       <td onclick="openRun(${run.id})" style="cursor:pointer">
-        ${escapeHtml(run.started_at || "-")}
+        ${escapeHtml(QETime.formatLocalDateTimeForList(run.started_at))}
       </td>
 
       <td>
@@ -181,7 +182,7 @@ document
       return;
     }
 
-    const started_at = `${date} ${time}`;
+    const started_at = QETime.toUtcSqlFromLocalDateTime(date, time);
 
     const response = await fetch(`/api/runs/game/${gameId}`, {
       method: "POST",

@@ -82,6 +82,7 @@
 
 </main>
 
+<script src="time-utils.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const pin = params.get("pin");
@@ -111,7 +112,7 @@ function showOnly(screenId) {
 
 function formatDateTime(value) {
   if (!value) return "";
-  return value;
+  return QETime.formatLocalDateTime(value);
 }
 
 function formatSeconds(totalSeconds) {
@@ -125,10 +126,10 @@ function formatSeconds(totalSeconds) {
 function getElapsedSecondsFromOpenedAt(openedAt) {
   if (!openedAt) return 0;
 
-  const openedDate = new Date(String(openedAt).replace(" ", "T") + "Z");
+  const openedDate = QETime.parseUtcDate(openedAt);
   const now = new Date();
 
-  if (Number.isNaN(openedDate.getTime())) return 0;
+  if (!openedDate || Number.isNaN(openedDate.getTime())) return 0;
 
   return Math.floor((now.getTime() - openedDate.getTime()) / 1000);
 }

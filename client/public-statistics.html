@@ -24,6 +24,7 @@
   </div>
 </div>
 
+<script src="time-utils.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const runCode = String(params.get("run") || "").trim().toUpperCase();
@@ -52,19 +53,7 @@ function formatDuration(totalSeconds) {
 }
 
 function formatDateTimeAsSaved(value) {
-  if (!value) {
-    return "-";
-  }
-
-  const text = String(value).trim();
-  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
-
-  if (!match) {
-    return text;
-  }
-
-  const [, year, month, day, hour, minute, second = "00"] = match;
-  return `${day}.${month}.${year}, ${hour}:${minute}:${second}`;
+  return QETime.formatLocalDateTime(value);
 }
 
 function getTeamBonusSeconds(team) {
@@ -218,7 +207,7 @@ function renderDetailedTable(teams, tasks) {
               <tr>
                 <td class="team-name-cell"><strong>${escapeHtml(team.name)}</strong></td>
 
-                <td class="time-stat-cell">${escapeHtml(team.started_at_display || "-")}</td>
+                <td class="time-stat-cell">${escapeHtml(QETime.formatLocalTime(team.started_at))}</td>
 
                 ${(team.tasks || []).map(task => `
                   <td class="task-stat-cell ${escapeHtml(task.cell?.status || "not_started")}">
