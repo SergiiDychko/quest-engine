@@ -11,11 +11,12 @@ const runRoutes = require("./routes/runs");
 const joinRoutes = require("./routes/join");
 const playRoutes = require("./routes/play");
 const pagesRoutes = require("./routes/pages");
+const uploadRoutes = require("./routes/uploads");
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "70mb" }));
 
 app.use(
   session({
@@ -34,12 +35,14 @@ app.use("/api/runs", runRoutes);
 app.use("/api/join", joinRoutes);
 app.use("/api/play", playRoutes);
 app.use("/api/pages", pagesRoutes);
+app.use("/api/uploads", uploadRoutes);
 
 app.use(
   "/api/statistics",
   require("./routes/statistics")
 );
 
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 app.use(express.static(path.join(__dirname, "../client")));
 
 app.get("/", (req, res) => {

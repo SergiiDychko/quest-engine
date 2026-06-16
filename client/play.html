@@ -83,6 +83,7 @@
 </main>
 
 <script src="time-utils.js"></script>
+<script src="content-renderer.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const pin = params.get("pin");
@@ -199,17 +200,8 @@ function renderContent(content) {
     return;
   }
 
-  container.innerHTML = content.map(item => {
-    if (item.type === "TEXT") {
-      return `
-        <div>
-          ${escapeHtml(item.content).replaceAll("\\n", "<br>")}
-        </div>
-      `;
-    }
-
-    return "";
-  }).join("");
+  container.innerHTML = QEContentRenderer.renderBlocks(content);
+  QEContentRenderer.resizeHtmlFrames(container);
 }
 
 function renderFormat() {

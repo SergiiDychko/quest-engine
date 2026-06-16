@@ -1172,3 +1172,161 @@ th.selected-stat-column-cell {
   opacity: 1;
   visibility: visible;
 }
+
+/* Content builder */
+.muted-text {
+  color: #555;
+  margin-top: 0;
+}
+
+.builder-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.builder-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.builder-empty {
+  border: 1px dashed #999;
+  padding: 14px;
+  background: #fafafa;
+  color: #555;
+}
+
+.builder-block {
+  border: 1px solid #bbb;
+  background: #fff;
+}
+
+.builder-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  background: #f0f0f0;
+  border-bottom: 1px solid #bbb;
+}
+
+.builder-block-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.builder-block-body {
+  padding: 8px;
+}
+
+.builder-block-body label {
+  display: block;
+  margin-top: 8px;
+  font-weight: bold;
+}
+
+.builder-block-body textarea,
+.builder-block-body input,
+.builder-block-body select {
+  width: 100%;
+}
+
+.builder-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.builder-upload-row input[type="file"] {
+  flex: 1;
+}
+
+.builder-upload-row button {
+  flex: none;
+}
+
+.inline-checkbox {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal !important;
+}
+
+.inline-checkbox input {
+  width: auto;
+}
+
+.builder-preview {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed #bbb;
+  background: #fafafa;
+}
+
+.builder-preview img {
+  max-width: 240px;
+  max-height: 180px;
+  display: block;
+}
+
+.builder-preview-row {
+  margin-top: 12px;
+}
+
+.content-block {
+  margin: 16px 0;
+}
+
+.content-text-block {
+  line-height: 1.5;
+}
+
+.content-image-block {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.content-image-block img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.content-image-block figcaption {
+  color: #555;
+  font-size: 14px;
+  margin-top: 6px;
+}
+
+.content-video-block iframe,
+.content-video-block video {
+  width: 100%;
+  max-width: 900px;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  background: #000;
+}
+
+.content-audio-block audio,
+.builder-audio-preview audio {
+  width: 100%;
+  max-width: 720px;
+}
+
+.content-html-frame {
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid #ccc;
+  background: white;
+  display: block;
+}
+
+.preview-layout {
+  padding-top: 10px;
+}

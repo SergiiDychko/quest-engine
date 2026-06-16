@@ -79,6 +79,77 @@ router.post("/:taskId", requireAuth, (req, res) => {
   );
 });
 
+
+router.put("/:taskId/bulk", requireAuth, (req, res) => {
+  const taskId = req.params.taskId;
+  const { blocks } = req.body || {};
+
+  if (!Array.isArray(blocks)) {
+    return res.status(400).json({ error: "Немає списку блоків" });
+  }
+
+  const allowedTypes = new Set(["TEXT", "IMAGE", "VIDEO", "AUDIO", "HTML"]);
+
+  for (const block of blocks) {
+    const type = String(block.type || "").toUpperCase();
+    if (!allowedTypes.has(type)) {
+      return res.status(400).json({ error: "Некоректний тип блоку" });
+    }
+  }
+
+  db.serialize(() => {
+    db.run("BEGIN TRANSACTION");
+
+    db.run(
+      `DELETE FROM task_content WHERE task_id = ?`,
+      [taskId],
+      deleteError => {
+        if (deleteError) {
+          db.run("ROLLBACK");
+          return res.status(500).json({ error: "Помилка очищення контенту" });
+        }
+
+        const stmt = db.prepare(`
+          INSERT INTO task_content (task_id, type, content, sort_order)
+          VALUES (?, ?, ?, ?)
+        `);
+
+        let failed = false;
+
+        blocks.forEach((block, index) => {
+          if (failed) return;
+
+          const type = String(block.type || "").toUpperCase();
+          const content = typeof block.content === "string"
+            ? block.content
+            : JSON.stringify(block.content || {});
+
+          stmt.run(taskId, type, content, index + 1, error => {
+            if (error && !failed) {
+              failed = true;
+            }
+          });
+        });
+
+        stmt.finalize(finalizeError => {
+          if (failed || finalizeError) {
+            db.run("ROLLBACK");
+            return res.status(500).json({ error: "Помилка збереження контенту" });
+          }
+
+          db.run("COMMIT", commitError => {
+            if (commitError) {
+              return res.status(500).json({ error: "Помилка завершення збереження" });
+            }
+
+            res.json({ message: "Контент збережено" });
+          });
+        });
+      }
+    );
+  });
+});
+
 router.put("/item/:id", requireAuth, (req, res) => {
   const contentId = req.params.id;
   const { content } = req.body;

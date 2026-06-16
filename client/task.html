@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Редагування завдання</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="content-renderer.js"></script>
+  <script src="content-builder.js"></script>
 </head>
 <body>
 <main class="app">
@@ -72,14 +74,12 @@
     </div>
 
     <section id="contentTab" class="tab-panel">
-      <h2>Контент завдання</h2>
-      <div id="contentList">Завантаження...</div>
-
-      <hr />
-
-      <h3>Додати текстовий блок</h3>
-      <textarea id="newTextContent" rows="6" placeholder="Текст завдання"></textarea>
-      <button id="addTextContentBtn">Додати текст</button>
+      <h2>Конструктор контенту завдання</h2>
+      <p class="muted-text">Додайте текст, зображення, відео, аудіо або власний HTML/CSS/JS. Порядок блоків можна змінювати кнопками ↑ та ↓.</p>
+      <div id="contentBuilder">Завантаження...</div>
+      <div class="save-row builder-preview-row">
+        <button id="previewTaskContentBtn" type="button">Попередній перегляд</button>
+      </div>
     </section>
 
     <section id="codesTab" class="tab-panel hidden">
@@ -283,92 +283,67 @@ document
     window.parent.location.reload();
   });
 
+let contentBuilder = null;
+
+function normalizeContentBlock(item) {
+  return {
+    id: item.id,
+    type: String(item.type || "TEXT").toUpperCase(),
+    content: item.content || ""
+  };
+}
+
 async function loadContent() {
   const response = await fetch(`/api/task-content/${taskId}`);
   const result = await response.json();
-
-  const contentList = document.getElementById("contentList");
+  const contentRoot = document.getElementById("contentBuilder");
 
   if (!response.ok) {
-    contentList.textContent = result.error || "Помилка завантаження контенту";
+    contentRoot.textContent = result.error || "Помилка завантаження контенту";
     return;
   }
 
-  if (!result.content.length) {
-    contentList.textContent = "Контенту поки немає.";
-    return;
-  }
+  const blocks = (result.content || []).map(normalizeContentBlock);
 
-  contentList.innerHTML = result.content.map(item => `
-    <div class="info-block">
-      <p><strong>${item.sort_order}. ${item.type}</strong></p>
-
-      <textarea id="content-${item.id}" rows="6">${escapeHtml(item.content)}</textarea>
-
-      <button onclick="saveContentItem(${item.id})">Зберегти блок</button>
-      <button onclick="deleteContentItem(${item.id})">Видалити блок</button>
-    </div>
-  `).join("");
+  contentBuilder = new QEContentBuilder({
+    root: contentRoot,
+    blocks,
+    previewTitle: currentTask
+      ? `Завдання ${currentTask.sort_order}. ${currentTask.title || ""}`
+      : "Попередній перегляд завдання"
+  });
 }
 
-document.getElementById("addTextContentBtn").addEventListener("click", async () => {
-  const content = document.getElementById("newTextContent").value.trim();
-
-  if (!content) {
-    document.getElementById("message").textContent = "Введіть текст";
-    return;
+async function saveContentBlocksSilently() {
+  if (!contentBuilder) {
+    return { ok: true };
   }
 
-  const response = await fetch(`/api/task-content/${taskId}`, {
-    method: "POST",
+  const response = await fetch(`/api/task-content/${taskId}/bulk`, {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      type: "TEXT",
-      content
+      blocks: contentBuilder.getBlocks()
     })
   });
 
-  const result = await response.json();
+  if (!response.ok) {
+    const result = await response.json();
+    return { ok: false, error: result.error || "Помилка збереження контенту" };
+  }
 
-  document.getElementById("message").textContent =
-    response.ok ? "Текст додано" : result.error;
+  return { ok: true };
+}
 
-  document.getElementById("newTextContent").value = "";
-  loadContent();
+document.getElementById("previewTaskContentBtn").addEventListener("click", () => {
+  if (!contentBuilder) return;
+
+  const title = currentTask
+    ? `Завдання ${currentTask.sort_order}. ${currentTask.title || ""}`
+    : "Попередній перегляд завдання";
+
+  contentBuilder.openPreview(title);
 });
-
-async function saveContentItem(contentId) {
-  const content = document.getElementById(`content-${contentId}`).value;
-
-  const response = await fetch(`/api/task-content/item/${contentId}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content })
-  });
-
-  const result = await response.json();
-
-  document.getElementById("message").textContent =
-    response.ok ? `Блок збережено о ${new Date().toLocaleTimeString()}` : result.error;
-
-  loadContent();
-}
-
-async function deleteContentItem(contentId) {
-  const confirmed = confirm("Видалити цей текстовий блок?");
-  if (!confirmed) return;
-
-  const response = await fetch(`/api/task-content/item/${contentId}`, {
-    method: "DELETE"
-  });
-
-  const result = await response.json();
-
-  document.getElementById("message").textContent =
-    response.ok ? "Блок видалено" : result.error;
-
-  loadContent();
-}
 
 async function loadHints() {
   const response = await fetch(`/api/task-hints/${taskId}`);
@@ -662,7 +637,7 @@ document.getElementById("saveAutoTransitionBtn").addEventListener("click", async
 });
 
 
-async function saveAllContentItemsSilently() {
+async function saveAllContentItemsSilently_DISABLED() {
   const items = Array.from(document.querySelectorAll('textarea[id^="content-"]'));
 
   for (const textarea of items) {
@@ -782,7 +757,7 @@ async function saveAutoTransitionSilently() {
 window.saveTaskChangesFromParent = async function () {
   const steps = [
     () => saveTaskHeader({ silent: true, skipReload: true }),
-    saveAllContentItemsSilently,
+    saveContentBlocksSilently,
     saveAllCodesSilently,
     saveAllHintsSilently,
     saveAutoTransitionSilently

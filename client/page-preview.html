@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Попередній перегляд</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="game-layout preview-layout">
+    <section class="card task-card">
+      <h1 id="previewTitle">Попередній перегляд</h1>
+      <div id="previewContent" class="task-content"></div>
+    </section>
+  </main>
+
+  <script src="content-renderer.js"></script>
+  <script>
+    const raw = sessionStorage.getItem("qePreviewPayload");
+    let payload = { title: "Попередній перегляд", blocks: [] };
+
+    try {
+      payload = raw ? JSON.parse(raw) : payload;
+    } catch (error) {}
+
+    document.getElementById("previewTitle").textContent = payload.title || "Попередній перегляд";
+    const previewContent = document.getElementById("previewContent");
+    previewContent.innerHTML = QEContentRenderer.renderBlocks(payload.blocks || []);
+    QEContentRenderer.resizeHtmlFrames(previewContent);
+  </script>
+</body>
+</html>

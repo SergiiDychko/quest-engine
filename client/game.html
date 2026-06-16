@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Редагування гри</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="content-renderer.js"></script>
+  <script src="content-builder.js"></script>
 </head>
 <body>
   <main class="app">
@@ -60,6 +62,7 @@ let currentGame = null;
 let currentTasks = [];
 let currentPages = {};
 let activeTab = "START";
+let systemPageBuilder = null;
 
 const pageLabels = {
   START: "Стартова",
@@ -201,6 +204,29 @@ function render() {
   }
 }
 
+function parsePageBlocks(page) {
+  const raw = page && page.content ? page.content : "";
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map(block => ({
+        type: block.type || "TEXT",
+        content: block.content || block.data || {}
+      }));
+    }
+  } catch (error) {}
+
+  if (raw) {
+    return [{
+      type: "TEXT",
+      content: JSON.stringify({ text: raw })
+    }];
+  }
+
+  return [];
+}
+
 function renderSystemPage(pageType) {
   const page = currentPages[pageType] || {
     page_type: pageType,
@@ -224,26 +250,28 @@ function renderSystemPage(pageType) {
         >
       </div>
 
-      <label>Текст сторінки</label>
-      <textarea
-        id="pageContentInput"
-        rows="8"
-        placeholder="Текст, який побачать гравці"
-      >${escapeHtml(page.content || "")}</textarea>
-
-      <label>CSS для цієї сторінки</label>
-      <textarea
-        id="pageCssInput"
-        rows="6"
-        placeholder="Необовʼязково. CSS лише для цієї сторінки."
-      >${escapeHtml(page.custom_css || "")}</textarea>
+      <h3>Конструктор сторінки</h3>
+      <p class="muted-text">Додайте текст, зображення, відео, аудіо або власний HTML/CSS/JS. Порядок блоків можна змінювати кнопками ↑ та ↓.</p>
+      <div id="systemPageBuilder" class="page-builder-root"></div>
 
       <div class="save-row">
-        <button id="savePageBtn">Зберегти всі зміни на сторінці</button>
+        <button id="previewPageBtn" type="button">Попередній перегляд</button>
+        <button id="savePageBtn" type="button">Зберегти всі зміни на сторінці</button>
         <span id="savePageMessage"></span>
       </div>
     </div>
   `;
+
+  systemPageBuilder = new QEContentBuilder({
+    root: document.getElementById("systemPageBuilder"),
+    blocks: parsePageBlocks(page),
+    previewTitle: page.title || pageLabels[pageType]
+  });
+
+  document.getElementById("previewPageBtn").addEventListener("click", () => {
+    const title = document.getElementById("pageTitleInput").value.trim() || pageLabels[pageType];
+    systemPageBuilder.openPreview(title);
+  });
 
   document.getElementById("savePageBtn").addEventListener("click", () => {
     saveSystemPage(pageType);
@@ -259,8 +287,8 @@ async function saveSystemPage(pageType) {
 
   const payload = {
     title: document.getElementById("pageTitleInput").value.trim(),
-    content: document.getElementById("pageContentInput").value,
-    custom_css: document.getElementById("pageCssInput").value
+    content: JSON.stringify(systemPageBuilder ? systemPageBuilder.getBlocks() : []),
+    custom_css: ""
   };
 
   const response = await fetch(`/api/pages/game/${gameId}/${pageType}`, {
