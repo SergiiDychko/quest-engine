@@ -25,7 +25,11 @@ function defaultPage(pageType) {
     },
     JOIN: {
       title: "Реєстрація команди",
-      content: "Введіть назву команди, щоб отримати посилання на гру."
+      content: JSON.stringify({
+        heading: "Реєстрація команди",
+        description: "Введіть назву команди, щоб отримати посилання на гру.",
+        button_text: "Створити команду"
+      })
     },
     FINISH: {
       title: "Гру завершено",

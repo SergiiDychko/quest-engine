@@ -1330,3 +1330,36 @@ th.selected-stat-column-cell {
 .preview-layout {
   padding-top: 10px;
 }
+
+/* Player flow custom pages */
+.player-service-page .task-content {
+  margin-top: 20px;
+}
+
+.registration-card textarea,
+.registration-card input {
+  max-width: 100%;
+}
+
+.registration-preview-details {
+  margin: 18px 0;
+}
+
+.registration-preview-details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.registration-preview-box {
+  margin-top: 12px;
+  padding: 24px;
+  border: 1px dashed #94a3b8;
+  border-radius: 18px;
+  background: #f8fafc;
+}
+
+.registration-preview-box input,
+.registration-preview-box button {
+  display: block;
+  margin-top: 12px;
+}

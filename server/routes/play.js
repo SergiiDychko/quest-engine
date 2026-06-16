@@ -51,6 +51,74 @@ function dbRun(sql, params = []) {
   });
 }
 
+
+function defaultGamePage(pageType) {
+  if (pageType === "START") {
+    return {
+      page_type: "START",
+      title: "Гра ще не почалась",
+      content: JSON.stringify([
+        {
+          type: "TEXT",
+          content: JSON.stringify({
+            text: "Гра ще не почалась. Спробуйте оновити сторінку пізніше."
+          })
+        }
+      ]),
+      custom_css: ""
+    };
+  }
+
+  if (pageType === "FINISH") {
+    return {
+      page_type: "FINISH",
+      title: "Гру завершено",
+      content: JSON.stringify([
+        {
+          type: "TEXT",
+          content: JSON.stringify({
+            text: "Вітаємо! Ви завершили гру."
+          })
+        }
+      ]),
+      custom_css: ""
+    };
+  }
+
+  return {
+    page_type: pageType,
+    title: "",
+    content: "[]",
+    custom_css: ""
+  };
+}
+
+function getGamePage(gameId, pageType, callback) {
+  db.get(
+    `
+    SELECT page_type, title, content, custom_css
+    FROM game_pages
+    WHERE game_id = ?
+      AND page_type = ?
+    `,
+    [gameId, pageType],
+    (error, page) => {
+      if (error) return callback(error);
+      callback(null, page || defaultGamePage(pageType));
+    }
+  );
+}
+
+function parseUtcDate(value) {
+  if (!value) return null;
+  const normalized = String(value).trim().replace(" ", "T");
+  const iso = /Z$|[+-]\d\d:?\d\d$/.test(normalized)
+    ? normalized
+    : `${normalized}Z`;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function getGameDataByPin(pin, callback) {
   db.get(
     `
@@ -410,20 +478,34 @@ router.get("/:pin", (req, res) => {
     }
 
     if (gameData.run_status === "ARCHIVED") {
-      return res.json({
-        status: "ARCHIVED",
-        game: gameData
+      return getGamePage(gameData.game_id, "FINISH", (pageError, page) => {
+        if (pageError) {
+          return res.status(500).json({ error: "Помилка завантаження фінальної сторінки" });
+        }
+
+        return res.json({
+          status: "ARCHIVED",
+          game: gameData,
+          page
+        });
       });
     }
 
     if (gameData.started_at && gameData.run_status !== "ACTIVE") {
-      const startDate = new Date(String(gameData.started_at).replace(" ", "T") + "Z");
+      const startDate = parseUtcDate(gameData.started_at);
       const now = new Date();
 
-      if (!Number.isNaN(startDate.getTime()) && now < startDate) {
-        return res.json({
-          status: "WAITING",
-          game: gameData
+      if (startDate && now < startDate) {
+        return getGamePage(gameData.game_id, "START", (pageError, page) => {
+          if (pageError) {
+            return res.status(500).json({ error: "Помилка завантаження стартової сторінки" });
+          }
+
+          return res.json({
+            status: "WAITING",
+            game: gameData,
+            page
+          });
         });
       }
     }
@@ -436,9 +518,16 @@ router.get("/:pin", (req, res) => {
       }
 
       if (!task) {
-        return res.json({
-          status: "FINISHED",
-          game: gameData
+        return getGamePage(gameData.game_id, "FINISH", (pageError, page) => {
+          if (pageError) {
+            return res.status(500).json({ error: "Помилка завантаження фінальної сторінки" });
+          }
+
+          return res.json({
+            status: "FINISHED",
+            game: gameData,
+            page
+          });
         });
       }
 

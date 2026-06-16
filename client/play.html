@@ -13,7 +13,7 @@
   <div id="waitingScreen" class="card hidden">
     <h1 id="waitingGameTitle">Гра</h1>
     <p id="waitingTeamName"></p>
-    <h2 id="waitingText">Очікування старту гри</h2>
+    <div id="waitingContent" class="task-content"></div>
   </div>
 
   <div id="noTasksScreen" class="card hidden">
@@ -21,7 +21,8 @@
   </div>
 
   <div id="finishedScreen" class="card hidden">
-    <h1>Вітаємо! Ви завершили гру.</h1>
+    <h1 id="finishedTitle">Вітаємо! Ви завершили гру.</h1>
+    <div id="finishedContent" class="task-content"></div>
   </div>
 
   <section id="gameScreen" class="hidden">
@@ -124,6 +125,31 @@ function formatSeconds(totalSeconds) {
   return `${String(minutesPart).padStart(2, "0")}:${String(secondsPart).padStart(2, "0")}`;
 }
 
+function parsePageBlocks(value) {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [{
+      type: "TEXT",
+      content: JSON.stringify({ text: String(value || "") })
+    }];
+  }
+}
+
+function renderPageContent(containerId, page) {
+  const container = document.getElementById(containerId);
+  const blocks = parsePageBlocks(page && page.content);
+
+  container.innerHTML = blocks.length
+    ? QEContentRenderer.renderBlocks(blocks)
+    : "";
+
+  QEContentRenderer.resizeHtmlFrames(container);
+}
+
 function getElapsedSecondsFromOpenedAt(openedAt) {
   if (!openedAt) return 0;
 
@@ -150,13 +176,17 @@ async function loadGame() {
     showOnly("waitingScreen");
 
     document.getElementById("waitingGameTitle").textContent =
-      result.game.game_title;
+      result.page?.title || result.game.game_title;
 
     document.getElementById("waitingTeamName").textContent =
       `Команда: ${result.game.team_name}`;
 
-    document.getElementById("waitingText").textContent =
-      `Гра почнеться: ${formatDateTime(result.game.started_at)}`;
+    renderPageContent("waitingContent", result.page);
+
+    if (!document.getElementById("waitingContent").innerHTML.trim()) {
+      document.getElementById("waitingContent").innerHTML =
+        `<p>Гра почнеться: ${formatDateTime(result.game.started_at)}</p>`;
+    }
 
     return;
   }
@@ -168,6 +198,9 @@ async function loadGame() {
 
   if (result.status === "FINISHED" || result.status === "ARCHIVED") {
     showOnly("finishedScreen");
+    document.getElementById("finishedTitle").textContent =
+      result.page?.title || "Вітаємо! Ви завершили гру.";
+    renderPageContent("finishedContent", result.page);
     return;
   }
 

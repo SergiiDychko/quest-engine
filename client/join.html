@@ -8,14 +8,18 @@
 </head>
 <body>
 
-<div class="app">
-  <div class="card">
+<div class="app player-service-page">
+  <div id="startPageBlock" class="card hidden">
+    <h1 id="startPageTitle">Гра ще не почалась</h1>
+    <div id="startPageContent" class="task-content"></div>
+  </div>
+
+  <div id="registrationCard" class="card registration-card hidden">
+    <style id="registrationCustomCss"></style>
 
     <div id="registrationBlock">
-
-      <h1 id="gameTitle">Завантаження...</h1>
-
-      <p>Введіть назву команди</p>
+      <h1 id="registrationTitle">Реєстрація команди</h1>
+      <p id="registrationDescription">Введіть назву команди</p>
 
       <input
         id="teamName"
@@ -28,11 +32,9 @@
       </button>
 
       <p id="errorMessage"></p>
-
     </div>
 
     <div id="successBlock" class="hidden">
-
       <h1>Вітаю, команду створено</h1>
 
       <p>
@@ -61,33 +63,123 @@
       </button>
 
       <span id="copyMessage"></span>
-
     </div>
-
   </div>
 </div>
 
+<script src="content-renderer.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const runCode = params.get("run");
 
 let currentRun = null;
 let currentPlayLink = "";
+let currentRegistrationSettings = null;
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function showOnly(id) {
+  document.getElementById("startPageBlock").classList.add("hidden");
+  document.getElementById("registrationCard").classList.add("hidden");
+  document.getElementById(id).classList.remove("hidden");
+}
+
+function parseBlocks(value) {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [{
+      type: "TEXT",
+      content: JSON.stringify({ text: String(value || "") })
+    }];
+  }
+}
+
+function parseRegistrationSettings(page) {
+  const fallback = {
+    heading: page?.title || "Реєстрація команди",
+    description: "Введіть назву команди, щоб отримати посилання на гру.",
+    button_text: "Створити команду"
+  };
+
+  if (!page || !page.content) return fallback;
+
+  try {
+    const parsed = JSON.parse(page.content);
+    if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
+      return {
+        heading: parsed.heading || fallback.heading,
+        description: parsed.description || fallback.description,
+        button_text: parsed.button_text || fallback.button_text
+      };
+    }
+  } catch (error) {
+    return {
+      ...fallback,
+      description: String(page.content || fallback.description)
+    };
+  }
+
+  return fallback;
+}
+
+function renderStartPage(page) {
+  const title = page?.title || "Гра ще не почалась";
+  const blocks = parseBlocks(page?.content);
+
+  document.getElementById("startPageTitle").textContent = title;
+  document.getElementById("startPageContent").innerHTML =
+    blocks.length
+      ? QEContentRenderer.renderBlocks(blocks)
+      : `<p>Гра ще не почалась. Спробуйте оновити сторінку пізніше.</p>`;
+
+  QEContentRenderer.resizeHtmlFrames(document.getElementById("startPageContent"));
+  showOnly("startPageBlock");
+}
+
+function renderRegistrationPage(page) {
+  currentRegistrationSettings = parseRegistrationSettings(page);
+
+  document.getElementById("registrationTitle").textContent =
+    currentRegistrationSettings.heading;
+  document.getElementById("registrationDescription").textContent =
+    currentRegistrationSettings.description;
+  document.getElementById("createTeamBtn").textContent =
+    currentRegistrationSettings.button_text;
+  document.getElementById("registrationCustomCss").textContent =
+    page?.custom_css || "";
+
+  showOnly("registrationCard");
+}
 
 async function loadRun() {
   const response = await fetch(`/api/join/${runCode}`);
   const result = await response.json();
 
   if (!response.ok) {
-    document.getElementById("gameTitle").textContent =
+    document.getElementById("startPageTitle").textContent =
       result.error || "Помилка";
+    showOnly("startPageBlock");
     return;
   }
 
   currentRun = result.run;
 
-  document.getElementById("gameTitle").textContent =
-    currentRun.game_title;
+  if (result.status === "WAITING") {
+    renderStartPage(result.page);
+    return;
+  }
+
+  renderRegistrationPage(result.page);
 }
 
 document
@@ -97,7 +189,7 @@ document
       document.getElementById("teamName").value.trim();
 
     if (!teamName) {
-      alert("Вкажіть назву команди");
+      document.getElementById("errorMessage").textContent = "Вкажіть назву команди";
       return;
     }
 
@@ -137,6 +229,14 @@ document
 
     document.getElementById("playLink").value =
       currentPlayLink;
+  });
+
+document
+  .getElementById("teamName")
+  .addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      document.getElementById("createTeamBtn").click();
+    }
   });
 
 document

@@ -227,6 +227,34 @@ function parsePageBlocks(page) {
   return [];
 }
 
+function parseRegistrationSettings(page) {
+  const fallback = {
+    heading: page?.title || "Реєстрація команди",
+    description: "Введіть назву команди, щоб отримати посилання на гру.",
+    button_text: "Створити команду"
+  };
+
+  if (!page || !page.content) return fallback;
+
+  try {
+    const parsed = JSON.parse(page.content);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return {
+        heading: parsed.heading || fallback.heading,
+        description: parsed.description || fallback.description,
+        button_text: parsed.button_text || fallback.button_text
+      };
+    }
+  } catch (error) {
+    return {
+      ...fallback,
+      description: String(page.content || fallback.description)
+    };
+  }
+
+  return fallback;
+}
+
 function renderSystemPage(pageType) {
   const page = currentPages[pageType] || {
     page_type: pageType,
@@ -234,6 +262,11 @@ function renderSystemPage(pageType) {
     content: "",
     custom_css: ""
   };
+
+  if (pageType === "JOIN") {
+    renderRegistrationSettingsPage(page);
+    return;
+  }
 
   const content = document.getElementById("tabContent");
 
@@ -278,6 +311,62 @@ function renderSystemPage(pageType) {
   });
 }
 
+function renderRegistrationSettingsPage(page) {
+  const settings = parseRegistrationSettings(page);
+  const content = document.getElementById("tabContent");
+
+  content.innerHTML = `
+    <div class="info-block page-editor-block">
+      <h2>${escapeHtml(pageLabels.JOIN)}</h2>
+      <p class="muted-text">
+        Це системна сторінка реєстрації команди. Тут можна змінити тексти й CSS,
+        але поле назви команди, кнопка створення та посилання на гру залишаються системними.
+      </p>
+
+      <div class="form-row">
+        <label>Заголовок</label>
+        <input id="registrationHeadingInput" type="text" value="${escapeHtml(settings.heading)}">
+      </div>
+
+      <div class="form-row">
+        <label>Опис / інструкція</label>
+        <textarea id="registrationDescriptionInput" rows="4">${escapeHtml(settings.description)}</textarea>
+      </div>
+
+      <div class="form-row">
+        <label>Текст кнопки</label>
+        <input id="registrationButtonTextInput" type="text" value="${escapeHtml(settings.button_text)}">
+      </div>
+
+      <div class="form-row">
+        <label>CSS сторінки реєстрації</label>
+        <textarea id="registrationCssInput" rows="10" placeholder=".registration-card { ... }">${escapeHtml(page.custom_css || "")}</textarea>
+      </div>
+
+      <details class="registration-preview-details">
+        <summary>Показати схематичний вигляд системної сторінки</summary>
+        <div class="registration-preview-box">
+          <h1>${escapeHtml(settings.heading)}</h1>
+          <p>${escapeHtml(settings.description)}</p>
+          <input type="text" placeholder="Наприклад: Месники" disabled>
+          <button type="button" disabled>${escapeHtml(settings.button_text)}</button>
+        </div>
+      </details>
+
+      <div class="save-row">
+        <button id="savePageBtn" type="button">Зберегти всі зміни на сторінці</button>
+        <span id="savePageMessage"></span>
+      </div>
+    </div>
+  `;
+
+  systemPageBuilder = null;
+
+  document.getElementById("savePageBtn").addEventListener("click", () => {
+    saveSystemPage("JOIN");
+  });
+}
+
 async function saveSystemPage(pageType) {
   const statusSaved = await saveGameStatus({ silent: true });
 
@@ -285,11 +374,30 @@ async function saveSystemPage(pageType) {
     return;
   }
 
-  const payload = {
-    title: document.getElementById("pageTitleInput").value.trim(),
-    content: JSON.stringify(systemPageBuilder ? systemPageBuilder.getBlocks() : []),
-    custom_css: ""
-  };
+  let payload;
+
+  if (pageType === "JOIN") {
+    const heading = document.getElementById("registrationHeadingInput").value.trim();
+    const description = document.getElementById("registrationDescriptionInput").value.trim();
+    const buttonText = document.getElementById("registrationButtonTextInput").value.trim();
+    const css = document.getElementById("registrationCssInput").value;
+
+    payload = {
+      title: heading,
+      content: JSON.stringify({
+        heading,
+        description,
+        button_text: buttonText || "Створити команду"
+      }),
+      custom_css: css || ""
+    };
+  } else {
+    payload = {
+      title: document.getElementById("pageTitleInput").value.trim(),
+      content: JSON.stringify(systemPageBuilder ? systemPageBuilder.getBlocks() : []),
+      custom_css: ""
+    };
+  }
 
   const response = await fetch(`/api/pages/game/${gameId}/${pageType}`, {
     method: "PUT",
