@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Запуски гри</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+  <div class="card">
+
+    <a href="javascript:history.back()">← Назад</a>
+
+    <h1 id="gameTitle">Запуски гри</h1>
+
+    <div class="info-block create-run-form">
+      <h2>Створити новий запуск</h2>
+
+      <label>
+        Назва запуску
+        <input
+          id="newRunTitle"
+          type="text"
+          placeholder="Наприклад: Ajax Systems Summer Quest"
+        >
+      </label>
+
+      <label>
+        Дата старту
+        <input id="newRunDate" type="date">
+      </label>
+
+      <label>
+        Час старту
+        <input id="newRunTime" type="time">
+      </label>
+
+      <button id="createRunBtn">Створити запуск</button>
+      <button id="showArchiveBtn">Переглянути архів запусків</button>
+    </div>
+
+    <div class="info-block">
+      <h2>Актуальні запуски</h2>
+
+      <table class="codes-table">
+        <thead>
+          <tr>
+            <th>Назва запуску</th>
+            <th>Старт</th>
+            <th>Статус</th>
+            <th>Статистика</th>
+            <th>Дії</th>
+          </tr>
+        </thead>
+
+        <tbody id="runsTableBody">
+          <tr>
+            <td colspan="5">Завантаження...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const gameId = params.get("id");
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+async function loadRuns() {
+  const response = await fetch(`/api/runs/game/${gameId}`);
+  const result = await response.json();
+
+  const tableBody = document.getElementById("runsTableBody");
+
+  if (!response.ok) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5">
+          ${escapeHtml(result.error || "Помилка завантаження")}
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  if (!result.runs.length) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5">Запусків поки немає</td>
+      </tr>
+    `;
+    return;
+  }
+
+  tableBody.innerHTML = result.runs.map(run => `
+    <tr>
+      <td onclick="openRun(${run.id})" style="cursor:pointer">
+        ${escapeHtml(run.title)}
+      </td>
+
+      <td onclick="openRun(${run.id})" style="cursor:pointer">
+        ${escapeHtml(run.started_at || "-")}
+      </td>
+
+      <td>
+        ${escapeHtml(run.status)}
+      </td>
+
+      <td>
+        <button onclick="openStatistics(${run.id})">
+          Статистика
+        </button>
+      </td>
+
+      <td>
+        <button onclick="deleteRun(${run.id})">
+          Видалити
+        </button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+function openRun(runId) {
+  window.location.href = `/run.html?id=${runId}`;
+}
+
+function openStatistics(runId) {
+  window.location.href = `/statistics.html?run=${runId}`;
+}
+
+async function deleteRun(runId) {
+  const confirmed = confirm("Видалити цей запуск?");
+  if (!confirmed) return;
+
+  const response = await fetch(`/api/runs/${runId}`, {
+    method: "DELETE"
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    alert(result.error || "Помилка видалення");
+    return;
+  }
+
+  loadRuns();
+}
+
+document
+  .getElementById("createRunBtn")
+  .addEventListener("click", async () => {
+    const title = document.getElementById("newRunTitle").value.trim();
+    const date = document.getElementById("newRunDate").value;
+    const time = document.getElementById("newRunTime").value;
+
+    if (!title) {
+      alert("Вкажіть назву запуску");
+      return;
+    }
+
+    if (!date) {
+      alert("Вкажіть дату старту");
+      return;
+    }
+
+    if (!time) {
+      alert("Вкажіть час старту");
+      return;
+    }
+
+    const started_at = `${date} ${time}`;
+
+    const response = await fetch(`/api/runs/game/${gameId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        title,
+        started_at
+      })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      alert(result.error);
+      return;
+    }
+
+    document.getElementById("newRunTitle").value = "";
+    loadRuns();
+  });
+
+document
+  .getElementById("showArchiveBtn")
+  .addEventListener("click", () => {
+    window.location.href = `/runs-archive.html?id=${gameId}`;
+  });
+
+loadRuns();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Адмін.статистика</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+  <div class="card">
+
+    <a href="javascript:history.back()">← Назад</a>
+
+    <h1 id="statisticsTitle">Адмін.статистика</h1>
+
+    <div id="publishStatisticsBlock" class="publish-statistics-block hidden">
+      <button id="publishStatisticsBtn">
+        Завершити гру і опублікувати
+      </button>
+
+      <span id="publishStatisticsMessage"></span>
+
+      <div id="publicLinkBlock" class="hidden">
+        <label>
+          Публічне посилання на статистику
+          <input id="publicStatisticsLink" type="text" readonly>
+        </label>
+      </div>
+    </div>
+
+    <div id="statisticsBlock">
+      Завантаження статистики...
+    </div>
+
+    <div id="detailsBlock" class="statistics-details hidden"></div>
+
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const runId = params.get("run");
+
+let currentRun = null;
+let currentTeams = [];
+let selectedCell = {
+  teamId: null,
+  taskId: null
+};
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function formatDuration(totalSeconds) {
+  if (totalSeconds === null || totalSeconds === undefined) {
+    return "-";
+  }
+
+  const seconds = Math.max(0, Number(totalSeconds) || 0);
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const sec = seconds % 60;
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+function getTeamBonusSeconds(team) {
+  return Number(team.total_bonus_seconds) || 0;
+}
+
+function getTeamPenaltySeconds(team) {
+  return Number(team.total_penalty_seconds) || 0;
+}
+
+function getFullTimeSeconds(team) {
+  return team.full_time_seconds === null ||
+    team.full_time_seconds === undefined
+      ? null
+      : Number(team.full_time_seconds);
+}
+
+function getGameTimeSeconds(team) {
+  const fullTime = getFullTimeSeconds(team);
+
+  if (fullTime === null) {
+    return null;
+  }
+
+  const bonus = getTeamBonusSeconds(team);
+  const penalty = getTeamPenaltySeconds(team);
+
+  return Math.max(0, fullTime - bonus + penalty);
+}
+
+function formatTaskCell(task) {
+  if (!task.cell) {
+    return `<div class="stat-empty">-</div>`;
+  }
+
+  if (task.cell.status === "not_started") {
+    return `<div class="stat-empty">-</div>`;
+  }
+
+  if (task.cell.status === "in_progress") {
+    return `
+      <div class="task-main-time in-progress-text">в процесі</div>
+      <div class="task-time-details">
+        (${escapeHtml(task.cell.start_time)} — -)
+      </div>
+    `;
+  }
+
+  return `
+    <div class="task-main-time">
+      ${escapeHtml(formatDuration(task.cell.duration_seconds))}
+    </div>
+    <div class="task-time-details">
+      (${escapeHtml(task.cell.start_time)} — ${escapeHtml(task.cell.finish_time)})
+    </div>
+  `;
+}
+
+function formatBonusPenalty(team) {
+  const bonus = getTeamBonusSeconds(team);
+  const penalty = getTeamPenaltySeconds(team);
+
+  if (!bonus && !penalty) {
+    return "-";
+  }
+
+  const total = penalty - bonus;
+  const totalClass = total <= 0 ? "stat-bonus" : "stat-penalty";
+  const totalSign = total <= 0 ? "-" : "+";
+
+  const details = [];
+
+  if (bonus) {
+    details.push(`<span class="stat-bonus-small">-${formatDuration(bonus)}</span>`);
+  }
+
+  if (penalty) {
+    details.push(`<span class="stat-penalty-small">+${formatDuration(penalty)}</span>`);
+  }
+
+  return `
+    <div class="${totalClass}">
+      ${totalSign}${formatDuration(Math.abs(total))}
+    </div>
+    <div class="bonus-penalty-details">
+      (${details.join(", ")})
+    </div>
+  `;
+}
+
+function prepareRanking(teams) {
+  const finishedTeams = teams
+    .filter(team => getGameTimeSeconds(team) !== null)
+    .sort((a, b) => getGameTimeSeconds(a) - getGameTimeSeconds(b));
+
+  finishedTeams.forEach((team, index) => {
+    team.place = index + 1;
+
+    if (index === 0) {
+      team.gap_from_previous_seconds = null;
+      team.gap_from_first_seconds = null;
+      return;
+    }
+
+    const previous = finishedTeams[index - 1];
+    const first = finishedTeams[0];
+
+    team.gap_from_previous_seconds =
+      getGameTimeSeconds(team) - getGameTimeSeconds(previous);
+
+    team.gap_from_first_seconds =
+      getGameTimeSeconds(team) - getGameTimeSeconds(first);
+  });
+
+  teams.forEach(team => {
+    if (getGameTimeSeconds(team) === null) {
+      team.place = null;
+      team.gap_from_previous_seconds = null;
+      team.gap_from_first_seconds = null;
+    }
+  });
+
+  return [
+    ...finishedTeams,
+    ...teams.filter(team => getGameTimeSeconds(team) === null)
+  ];
+}
+
+function updateTitle(run) {
+  const title = run?.title || "Запуск";
+  const startedAt = run?.started_at_display || run?.started_at || "-";
+
+  document.getElementById("statisticsTitle").textContent =
+    `Адмін.статистика "${title}", ${startedAt}`;
+}
+
+async function publishStatistics() {
+  if (!currentRun) {
+    alert("Статистика ще не завантажена");
+    return;
+  }
+
+  const confirmed = confirm(
+    `Завершити гру "${currentRun.title}" і опублікувати статистику?\n\nПісля цього запуск буде перенесено в архів, а публічна статистика стане доступною за посиланням.`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const response = await fetch(`/api/runs/${runId}/publish`, {
+    method: "POST"
+  });
+
+  const result = await response.json();
+
+  const message = document.getElementById("publishStatisticsMessage");
+  const linkBlock = document.getElementById("publicLinkBlock");
+  const linkInput = document.getElementById("publicStatisticsLink");
+
+  if (!response.ok) {
+    message.className = "";
+    message.textContent = result.error || "Помилка публікації статистики";
+    return;
+  }
+
+  const publicUrl = result.public_statistics_url || "";
+
+  linkInput.value = publicUrl;
+  linkBlock.classList.remove("hidden");
+
+  if (publicUrl) {
+    await navigator.clipboard.writeText(publicUrl);
+  }
+
+  message.className = "success-message";
+  message.textContent = "✓ Гру завершено, посилання скопійовано";
+
+  setTimeout(() => {
+    message.textContent = "";
+  }, 3000);
+
+  loadStatistics();
+}
+
+function formatAnswerType(type) {
+  if (type === "MAIN") return "Основний";
+  if (type === "BONUS") return "Бонусний";
+  if (type === "PENALTY") return "Штрафний";
+  return type || "-";
+}
+
+function formatAdjustmentType(type) {
+  if (type === "BONUS_CODE") return "Бонусний код";
+  if (type === "PENALTY_CODE") return "Штрафний код";
+  if (type === "AUTO_TRANSITION") return "Автоперехід";
+  if (type === "MANUAL_BONUS") return "Ручний бонус";
+  if (type === "MANUAL_PENALTY") return "Ручний штраф";
+  return type || "-";
+}
+
+function formatAdjustmentValue(item) {
+  const seconds = Math.abs(Number(item.seconds) || 0);
+
+  if (
+    item.adjustment_type === "BONUS_CODE" ||
+    item.adjustment_type === "MANUAL_BONUS"
+  ) {
+    return `<span class="stat-bonus">-${formatDuration(seconds)}</span>`;
+  }
+
+  return `<span class="stat-penalty">+${formatDuration(seconds)}</span>`;
+}
+
+function renderTextContent(value) {
+  return escapeHtml(value || "").replaceAll("\\n", "<br>");
+}
+
+function renderDetailsList(items, emptyText, renderItem) {
+  if (!items || !items.length) {
+    return `<p class="muted-text">${escapeHtml(emptyText)}</p>`;
+  }
+
+  return `
+    <ul>
+      ${items.map(renderItem).join("")}
+    </ul>
+  `;
+}
+
+function renderDetailsTable(items, emptyText, headers, renderRow) {
+  if (!items || !items.length) {
+    return `<p class="muted-text">${escapeHtml(emptyText)}</p>`;
+  }
+
+  return `
+    <table class="codes-table">
+      <thead>
+        <tr>
+          ${headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map(renderRow).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function getSelectedCellClass(team, task) {
+  const isSelectedRow =
+    Number(selectedCell.teamId) === Number(team.id);
+
+  const isSelectedColumn =
+    Number(selectedCell.taskId) === Number(task.id);
+
+  const isSelectedCell =
+    isSelectedRow && isSelectedColumn;
+
+  const classes = [];
+
+  if (isSelectedRow) {
+    classes.push("selected-stat-row-cell");
+  }
+
+  if (isSelectedColumn) {
+    classes.push("selected-stat-column-cell");
+  }
+
+  if (isSelectedCell) {
+    classes.push("selected-stat-cell");
+  }
+
+  return classes.join(" ");
+}
+
+function refreshStatisticsTableHighlight() {
+  document
+    .querySelectorAll(".statistics-table td, .statistics-table th")
+    .forEach(cell => {
+      cell.classList.remove(
+        "selected-stat-row-cell",
+        "selected-stat-column-cell",
+        "selected-stat-cell"
+      );
+    });
+
+  document
+    .querySelectorAll(".statistics-table tbody tr")
+    .forEach(row => {
+      row.classList.remove("selected-stat-row");
+    });
+
+  if (!selectedCell.teamId) {
+    return;
+  }
+
+  const selectedRowCell = document.querySelector(
+    `[data-team-id="${selectedCell.teamId}"]`
+  );
+
+  if (selectedRowCell) {
+    selectedRowCell
+      .closest("tr")
+      .classList.add("selected-stat-row");
+  }
+
+  if (selectedCell.specialColumn) {
+    document
+      .querySelectorAll(
+        `[data-special-column="${selectedCell.specialColumn}"]`
+      )
+      .forEach(cell => {
+        cell.classList.add("selected-stat-column-cell");
+      });
+
+    document
+      .querySelectorAll(
+        `[data-team-id="${selectedCell.teamId}"][data-special-column="${selectedCell.specialColumn}"]`
+      )
+      .forEach(cell => {
+        cell.classList.add("selected-stat-cell");
+      });
+  }
+
+  if (selectedCell.taskId) {
+    document
+      .querySelectorAll(`[data-task-id="${selectedCell.taskId}"]`)
+      .forEach(cell => {
+        cell.classList.add("selected-stat-column-cell");
+      });
+
+    document
+      .querySelectorAll(
+        `[data-team-id="${selectedCell.teamId}"][data-task-id="${selectedCell.taskId}"]`
+      )
+      .forEach(cell => {
+        cell.classList.add("selected-stat-cell");
+      });
+  }
+}
+
+async function renderTaskDetails(teamId, taskId) {
+  selectedCell = {
+    teamId: Number(teamId),
+    taskId: Number(taskId)
+  };
+
+  refreshStatisticsTableHighlight();
+
+  const block = document.getElementById("detailsBlock");
+
+  block.classList.remove("hidden");
+  block.innerHTML = `
+    <div class="info-block">
+      Завантаження деталей завдання...
+    </div>
+  `;
+
+  try {
+    const response = await fetch(
+  `/api/statistics/team/${teamId}/task/${taskId}?t=${Date.now()}`,
+  {
+    cache: "no-store"
+  }
+);
+    const result = await response.json();
+
+    if (!response.ok) {
+      block.innerHTML = `
+        <div class="info-block">
+          ${escapeHtml(result.error || "Помилка завантаження деталей")}
+        </div>
+      `;
+      return;
+    }
+
+    const task = result.task || {};
+const content = result.content || [];
+const hints = result.hints || [];
+const answers = result.answers || [];
+const foundAnswers = result.found_answers || [];
+const answerLog = result.answer_log || [];
+const adjustments = result.adjustments || [];
+
+    block.innerHTML = `
+      <div class="info-block">
+        <h2>Деталі завдання</h2>
+
+        <details>
+          <summary>Контент завдання</summary>
+          ${
+            content.length
+              ? content.map(item => `
+                  <div class="details-content-item">
+                    <strong>${escapeHtml(item.type || "TEXT")}:</strong><br>
+                    ${renderTextContent(item.content)}
+                  </div>
+                `).join("")
+              : `<p class="muted-text">Контент завдання не заповнений.</p>`
+          }
+        </details>
+
+        <details>
+          <summary>Підказки</summary>
+          ${renderDetailsList(
+            hints,
+            "Підказки у цьому завданні не передбачені.",
+            hint => `
+              <li>
+                <strong>Підказка №${escapeHtml(hint.sort_order)}:</strong>
+                через ${escapeHtml(hint.show_after_seconds)} сек —
+                ${renderTextContent(hint.content)}
+              </li>
+            `
+          )}
+        </details>
+
+        <details>
+          <summary>Всі коди завдання</summary>
+          ${renderDetailsTable(
+            answers,
+            "Коди у цьому завданні не передбачені.",
+            ["Тип", "Код", "Опис", "Коментар", "Коригування"],
+            answer => `
+              <tr>
+                <td>${escapeHtml(formatAnswerType(answer.answer_type))}</td>
+                <td><strong>${escapeHtml(answer.answer_text || "")}</strong></td>
+                <td>${escapeHtml(answer.description || "-")}</td>
+                <td>${escapeHtml(answer.comment || "-")}</td>
+                <td>${escapeHtml(formatDuration(Math.abs(Number(answer.time_modifier_seconds) || 0)))}</td>
+              </tr>
+            `
+          )}
+        </details>
+
+        <details>
+          <summary>Прийняті коди</summary>
+          ${renderDetailsTable(
+            foundAnswers,
+            "Команда ще не здала жодного правильного коду на цьому завданні.",
+            ["Час", "Тип", "Код", "Опис", "Коментар"],
+            answer => `
+              <tr>
+                <td>${escapeHtml(answer.found_at || "-")}</td>
+                <td>${escapeHtml(formatAnswerType(answer.answer_type))}</td>
+                <td><strong>${escapeHtml(answer.answer_text || "")}</strong></td>
+                <td>${escapeHtml(answer.description || "-")}</td>
+                <td>${escapeHtml(answer.comment || "-")}</td>
+              </tr>
+            `
+          )}
+        </details>
+
+        <details>
+          <summary>Лог введених відповідей</summary>
+          ${renderDetailsTable(
+            answerLog,
+            "Команда ще нічого не вводила на цьому завданні.",
+            ["Час", "Введено", "Статус"],
+            item => `
+              <tr>
+                <td>${escapeHtml(item.created_at || "-")}</td>
+                <td>${escapeHtml(item.answer || "")}</td>
+                <td>
+                  ${
+                    Number(item.is_correct) === 1
+                      ? `<span class="stat-bonus">правильна</span>`
+                      : `<span class="stat-penalty">неправильна</span>`
+                  }
+                </td>
+              </tr>
+            `
+          )}
+        </details>
+
+        <details>
+          <summary>Бонуси і штрафи, що команда отримала на цьому завданні</summary>
+          ${renderDetailsTable(
+            adjustments,
+            "На цьому завданні немає бонусів або штрафів.",
+            ["Час", "Тип", "Значення", "Коментар"],
+            item => `
+              <tr>
+                <td>${escapeHtml(item.created_at || "-")}</td>
+                <td>${escapeHtml(formatAdjustmentType(item.adjustment_type))}</td>
+                <td>${formatAdjustmentValue(item)}</td>
+                <td>${escapeHtml(item.comment || "-")}</td>
+              </tr>
+            `
+          )}
+        </details>
+        ${
+  task.cell?.status === "in_progress"
+    ? `
+      <div class="admin-task-actions">
+        <button
+          onclick="forceFinishTask(${teamId}, ${taskId})"
+        >
+          Закінчити завдання
+        </button>
+      </div>
+    `
+    : ""
+}        
+      </div>
+    `;
+
+    block.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+
+  } catch (error) {
+    block.innerHTML = `
+      <div class="info-block">
+        Помилка завантаження деталей завдання
+      </div>
+    `;
+  }
+}
+
+async function renderTeamAdjustments(teamId) {
+selectedCell = {
+  teamId: Number(teamId),
+  taskId: null,
+  specialColumn: "adjustments"
+};
+
+refreshStatisticsTableHighlight();
+
+  const team = currentTeams.find(
+    item => Number(item.id) === Number(teamId)
+  );
+
+  if (!team) {
+    return;
+  }
+
+  const block = document.getElementById("detailsBlock");
+
+  block.classList.remove("hidden");
+
+  block.innerHTML = `
+    <div class="info-block">
+      <h2>Бонуси та штрафи команди "${escapeHtml(team.name)}"</h2>
+
+<div class="adjustment-actions">
+
+  <button
+    onclick="showManualAdjustmentForm(
+      ${team.id},
+      'MANUAL_BONUS'
+    )"
+  >
+    ➕ Додати бонус
+  </button>
+
+  <button
+    onclick="showManualAdjustmentForm(
+      ${team.id},
+      'MANUAL_PENALTY'
+    )"
+  >
+    ➖ Додати штраф
+  </button>
+
+</div>
+
+<div id="manualAdjustmentForm"></div>
+
+      ${
+        renderDetailsTable(
+          team.adjustments || [],
+          "У команди немає бонусів або штрафів.",
+          ["Завдання", "Тип", "Значення", "Коментар", "Час", "Дії"],
+          item => `
+  <tr>
+    <td>
+      ${
+        item.task_sort_order
+          ? `Завдання ${item.task_sort_order}`
+          : "-"
+      }
+    </td>
+
+    <td>
+      ${escapeHtml(
+        formatAdjustmentType(
+          item.adjustment_type
+        )
+      )}
+    </td>
+
+    <td>
+      ${formatAdjustmentValue(item)}
+    </td>
+
+    <td>
+      ${escapeHtml(item.comment || "-")}
+    </td>
+
+    <td>
+      ${escapeHtml(item.created_at || "-")}
+    </td>
+
+    <td>
+      ${
+        item.adjustment_type === "MANUAL_BONUS" ||
+        item.adjustment_type === "MANUAL_PENALTY"
+          ? `
+            <button
+              onclick="deleteManualAdjustment(
+                ${team.id},
+                ${item.id}
+              )"
+            >
+              Видалити
+            </button>
+          `
+          : ""
+      }
+    </td>
+  </tr>
+`
+        )
+      }
+    </div>
+  `;
+
+  block.scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  });
+}
+
+function showManualAdjustmentForm(
+  teamId,
+  adjustmentType
+) {
+  const block =
+    document.getElementById(
+      "manualAdjustmentForm"
+    );
+
+  const title =
+    adjustmentType === "MANUAL_BONUS"
+      ? "Додати бонус"
+      : "Додати штраф";
+
+  block.innerHTML = `
+    <div class="info-block">
+
+      <h3>${title}</h3>
+
+      <label>
+        Секунд
+
+        <input
+          id="adjustmentSeconds"
+          type="number"
+          min="1"
+          value="60"
+        >
+      </label>
+
+      <label>
+        Коментар
+
+        <input
+          id="adjustmentComment"
+          type="text"
+        >
+      </label>
+
+      <button
+        onclick="
+          saveManualAdjustment(
+            ${teamId},
+            '${adjustmentType}'
+          )
+        "
+      >
+        Зберегти
+      </button>
+
+    </div>
+  `;
+}
+
+async function saveManualAdjustment(
+  teamId,
+  adjustmentType
+) {
+  const seconds =
+    Number(
+      document.getElementById(
+        "adjustmentSeconds"
+      ).value
+    ) || 0;
+
+  const comment =
+    document.getElementById(
+      "adjustmentComment"
+    ).value.trim();
+
+  if (!seconds) {
+    alert("Вкажіть секунди");
+    return;
+  }
+
+  const team =
+    currentTeams.find(
+      item =>
+        Number(item.id) === Number(teamId)
+    );
+
+  if (!team) {
+    return;
+  }
+
+  const isBonus =
+    adjustmentType === "MANUAL_BONUS";
+
+  const endpoint =
+    isBonus ? "bonus" : "penalty";
+
+  const actionText =
+    isBonus ? "бонус" : "штраф";
+
+  const confirmed = confirm(
+    `Ви призначаєте ${actionText} ${seconds} сек команді "${team.name}"?`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const response = await fetch(
+    `/api/statistics/team/${teamId}/${endpoint}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type":
+          "application/json"
+      },
+      body: JSON.stringify({
+        seconds,
+        comment
+      })
+    }
+  );
+
+  const result =
+    await response.json();
+
+  if (!response.ok) {
+    alert(
+      result.error ||
+      "Помилка збереження"
+    );
+    return;
+  }
+
+  await loadStatistics();
+
+  renderTeamAdjustments(teamId);
+}
+
+async function deleteManualAdjustment(
+  teamId,
+  adjustmentId
+) {
+  const confirmed = confirm(
+    "Видалити це коригування?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const response = await fetch(
+    `/api/statistics/team/${teamId}/adjustment/${adjustmentId}`,
+    {
+      method: "DELETE"
+    }
+  );
+
+  const result =
+    await response.json();
+
+  if (!response.ok) {
+    alert(
+      result.error ||
+      "Помилка видалення"
+    );
+    return;
+  }
+
+  await loadStatistics();
+
+  renderTeamAdjustments(teamId);
+}
+
+async function forceFinishTask(teamId, taskId) {
+  const confirmed = confirm(
+    "Примусово завершити це завдання для команди?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const response = await fetch(
+    `/api/statistics/team/${teamId}/task/${taskId}/finish`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({})
+    }
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    alert(result.error || "Помилка завершення завдання");
+    await loadStatistics();
+    return;
+  }
+
+  await loadStatistics();
+
+  renderTaskDetails(teamId, taskId);
+}
+
+async function loadStatistics() {
+  const response = await fetch(
+  `/api/statistics/run/${runId}?t=${Date.now()}`,
+  {
+    cache: "no-store"
+  }
+);
+  const result = await response.json();
+
+  const block = document.getElementById("statisticsBlock");
+
+  if (!response.ok) {
+    block.textContent = result.error || "Помилка завантаження статистики";
+    return;
+  }
+
+  currentRun = result.run || null;
+
+  document
+  .getElementById("publishStatisticsBlock")
+  .classList.remove("hidden");
+
+  if (currentRun) {
+    updateTitle(currentRun);
+  }
+
+  const rawTeams = result.teams || [];
+  const teams = prepareRanking(rawTeams);
+  currentTeams = teams;
+
+  const tasks = teams[0]?.tasks || [];
+
+  if (!teams.length) {
+    block.textContent = "Команд поки немає.";
+    return;
+  }
+
+  block.innerHTML = `
+    <div class="statistics-table-wrapper">
+      <table class="statistics-table">
+        <thead>
+          <tr>
+            <th>Команда</th>
+
+            <th>Час старту</th>
+
+            ${tasks.map(task => `
+             <th data-task-id="${task.id}">
+  Завдання ${task.sort_order}<br>
+  <small>${escapeHtml(task.title)}</small>
+</th>
+            `).join("")}
+
+            <th>Час фінішу</th>
+            <th>Від старту<br>до фінішу</th>
+            <th data-special-column="adjustments">Бонуси /<br>штрафи</th>
+            <th>Ігровий час</th>
+            <th>Відставання від<br>попередньої</th>
+            <th>Відставання від<br>першої</th>
+            <th>Місце</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${teams.map(team => {
+            const fullTime = getFullTimeSeconds(team);
+            const gameTime = getGameTimeSeconds(team);
+
+            return `
+              <tr>
+                <td>
+                  <strong>${escapeHtml(team.name)}</strong>
+                </td>
+
+                <td class="time-stat-cell">
+                  ${escapeHtml(team.started_at_display || "-")}
+                </td>
+
+                ${team.tasks.map(task => `
+                  <td
+                    class="task-stat-cell clickable-stat-cell ${escapeHtml(task.cell.status)} ${getSelectedCellClass(team, task)}"
+                    data-team-id="${team.id}"
+                    data-task-id="${task.id}"
+                    onclick="renderTaskDetails(${team.id}, ${task.id})"
+                    title="Показати деталі завдання"
+                  >
+                    ${formatTaskCell(task)}
+                  </td>
+                `).join("")}
+
+                <td class="time-stat-cell">
+                  ${escapeHtml(team.finished_at_display || "-")}
+                </td>
+
+                <td class="time-stat-cell">
+                  ${escapeHtml(formatDuration(fullTime))}
+                </td>
+
+                <td
+  class="time-stat-cell clickable-stat-cell"
+  onclick="renderTeamAdjustments(${team.id})"
+  data-team-id="${team.id}"
+  data-special-column="adjustments"
+  title="Показати всі бонуси та штрафи команди"
+>
+  ${formatBonusPenalty(team)}
+</td>
+
+                <td class="time-stat-cell main-time-cell">
+                  ${escapeHtml(formatDuration(gameTime))}
+                </td>
+
+                <td class="time-stat-cell">
+                  ${team.gap_from_previous_seconds === null
+                    ? "-"
+                    : escapeHtml(formatDuration(team.gap_from_previous_seconds))}
+                </td>
+
+                <td class="time-stat-cell">
+                  ${team.gap_from_first_seconds === null
+                    ? "-"
+                    : escapeHtml(formatDuration(team.gap_from_first_seconds))}
+                </td>
+
+                <td class="place-cell">
+                  ${team.place || "-"}
+                </td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+document
+  .getElementById("publishStatisticsBtn")
+  .addEventListener("click", publishStatistics);
+
+loadStatistics();
+</script>
+
+</body>
+</html>

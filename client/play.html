@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Гра</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<main class="game-layout">
+
+  <div id="waitingScreen" class="card hidden">
+    <h1 id="waitingGameTitle">Гра</h1>
+    <p id="waitingTeamName"></p>
+    <h2 id="waitingText">Очікування старту гри</h2>
+  </div>
+
+  <div id="noTasksScreen" class="card hidden">
+    <h1>У цій грі ще немає завдань</h1>
+  </div>
+
+  <div id="finishedScreen" class="card hidden">
+    <h1>Вітаємо! Ви завершили гру.</h1>
+  </div>
+
+  <section id="gameScreen" class="hidden">
+
+    <div class="fixed-answer-wrapper">
+
+      <div class="player-team-row">
+        <div>
+          Команда:
+          <strong id="teamNameDisplay"></strong>
+        </div>
+
+        <button
+          id="editTeamNameBtn"
+          class="small-light-btn"
+          title="Змінити назву команди"
+        >
+          ✏️
+        </button>
+      </div>
+
+      <div id="teamNameEditBlock" class="team-name-edit hidden">
+        <input id="teamNameInput" type="text" placeholder="Назва команди">
+        <button id="saveTeamNameBtn">Зберегти</button>
+        <button id="cancelTeamNameBtn">Скасувати</button>
+        <span id="teamNameMessage"></span>
+      </div>
+
+      <div class="fixed-answer-bar">
+        <input id="answerInput" type="text" placeholder="Введіть відповідь">
+        <button id="submitAnswerBtn">Відправити</button>
+      </div>
+
+      <div id="answerMessage"></div>
+
+    </div>
+
+    <div class="card task-card">
+
+      <h1 id="gameTitle"></h1>
+
+      <h2 id="taskTitle"></h2>
+
+      <div id="taskContent" class="task-content"></div>
+
+      <div id="formatBlock" class="info-block hidden">
+        <h3>Відповіді</h3>
+        <div id="formatContent"></div>
+      </div>
+
+      <div id="hintsBlock" class="hints-block hidden">
+        <h3>Підказки</h3>
+        <div id="hintsContent"></div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const pin = params.get("pin");
+
+let hintsInterval = null;
+let currentAnswers = [];
+let currentFoundAnswers = [];
+let currentTeamName = "";
+let currentTask = null;
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function showOnly(screenId) {
+  document.getElementById("waitingScreen").classList.add("hidden");
+  document.getElementById("noTasksScreen").classList.add("hidden");
+  document.getElementById("finishedScreen").classList.add("hidden");
+  document.getElementById("gameScreen").classList.add("hidden");
+
+  document.getElementById(screenId).classList.remove("hidden");
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  return value;
+}
+
+function formatSeconds(totalSeconds) {
+  const seconds = Math.max(0, Number(totalSeconds) || 0);
+  const minutesPart = Math.floor(seconds / 60);
+  const secondsPart = seconds % 60;
+
+  return `${String(minutesPart).padStart(2, "0")}:${String(secondsPart).padStart(2, "0")}`;
+}
+
+function getElapsedSecondsFromOpenedAt(openedAt) {
+  if (!openedAt) return 0;
+
+  const openedDate = new Date(String(openedAt).replace(" ", "T") + "Z");
+  const now = new Date();
+
+  if (Number.isNaN(openedDate.getTime())) return 0;
+
+  return Math.floor((now.getTime() - openedDate.getTime()) / 1000);
+}
+
+async function loadGame() {
+  const response = await fetch(`/api/play/${pin}`);
+  const result = await response.json();
+
+  if (!response.ok) {
+    showOnly("waitingScreen");
+    document.getElementById("waitingGameTitle").textContent =
+      result.error || "Помилка";
+    return;
+  }
+
+  if (result.status === "WAITING") {
+    showOnly("waitingScreen");
+
+    document.getElementById("waitingGameTitle").textContent =
+      result.game.game_title;
+
+    document.getElementById("waitingTeamName").textContent =
+      `Команда: ${result.game.team_name}`;
+
+    document.getElementById("waitingText").textContent =
+      `Гра почнеться: ${formatDateTime(result.game.started_at)}`;
+
+    return;
+  }
+
+  if (result.status === "NO_TASKS") {
+    showOnly("noTasksScreen");
+    return;
+  }
+
+  if (result.status === "FINISHED") {
+    showOnly("finishedScreen");
+    return;
+  }
+
+  showOnly("gameScreen");
+
+  currentTask = result.task;
+  currentAnswers = result.answers || [];
+  currentFoundAnswers = result.found_answers || [];
+  currentTeamName = result.game.team_name || "";
+
+  document.getElementById("teamNameDisplay").textContent = currentTeamName;
+  document.getElementById("teamNameInput").value = currentTeamName;
+
+  document.getElementById("gameTitle").textContent =
+    result.game.game_title;
+
+  document.getElementById("taskTitle").textContent =
+    `Завдання ${result.task.sort_order}. ${result.task.title}`;
+
+  renderContent(result.content || []);
+  renderFormat();
+  renderHintsAndAutoTransition(result.hints || [], result.task);
+}
+
+function renderContent(content) {
+  const container = document.getElementById("taskContent");
+
+  if (!content.length) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = content.map(item => {
+    if (item.type === "TEXT") {
+      return `
+        <div>
+          ${escapeHtml(item.content).replaceAll("\\n", "<br>")}
+        </div>
+      `;
+    }
+
+    return "";
+  }).join("");
+}
+
+function renderFormat() {
+  const block = document.getElementById("formatBlock");
+  const container = document.getElementById("formatContent");
+
+  if (!currentAnswers.length) {
+    block.classList.add("hidden");
+    return;
+  }
+
+  block.classList.remove("hidden");
+
+  const main = currentAnswers.filter(a => a.answer_type === "MAIN");
+  const bonus = currentAnswers.filter(a => a.answer_type === "BONUS");
+  const penalty = currentAnswers.filter(a => a.answer_type === "PENALTY");
+
+  const rows = [];
+
+  main.forEach((answer, index) => {
+    rows.push(formatAnswerLine(`Основний код ${index + 1}`, answer));
+  });
+
+  bonus.forEach((answer, index) => {
+    rows.push(formatAnswerLine(`Бонусний код ${index + 1}`, answer));
+  });
+
+  penalty.forEach((answer, index) => {
+    rows.push(formatAnswerLine(`Штрафний код ${index + 1}`, answer));
+  });
+
+  container.innerHTML = rows.join("");
+}
+
+function formatAnswerLine(label, answer) {
+  const found = currentFoundAnswers.find(item =>
+    Number(item.task_answer_id || item.id) === Number(answer.id)
+  );
+
+  if (found) {
+    const comment = String(found.comment || answer.comment || "").trim();
+    const code = found.answer_text || "";
+
+    const cssClass =
+      answer.answer_type === "PENALTY"
+        ? "accepted-penalty-answer"
+        : "accepted-answer";
+
+    return `
+      <p class="${cssClass}">
+        <strong>${escapeHtml(label)}:</strong>
+        ${escapeHtml(code)}
+        ${comment ? ` - ${escapeHtml(comment)}` : ""}
+      </p>
+    `;
+  }
+
+  const description = String(answer.description || "").trim();
+
+  if (!description) {
+    return `<p>${escapeHtml(label)}</p>`;
+  }
+
+  return `<p>${escapeHtml(label)}: ${escapeHtml(description)}</p>`;
+}
+
+function renderHintsAndAutoTransition(hints, task) {
+  const block = document.getElementById("hintsBlock");
+  const container = document.getElementById("hintsContent");
+
+  if (hintsInterval) {
+    clearInterval(hintsInterval);
+    hintsInterval = null;
+  }
+
+  const hasHints = hints.length > 0;
+  const hasAutoTransition =
+    Number(task.auto_transition_minutes) > 0;
+
+  block.classList.remove("hidden");
+
+  const elapsedSeconds = getElapsedSecondsFromOpenedAt(task.opened_at);
+
+  const hintsState = hints.map(hint => ({
+    id: hint.id,
+    sort_order: hint.sort_order,
+    content: hint.content || "",
+    remaining: Math.max(0, Number(hint.show_after_seconds || 0) - elapsedSeconds)
+  }));
+
+  const autoState = hasAutoTransition
+    ? {
+        remaining: Math.max(
+          0,
+          Number(task.auto_transition_minutes || 0) - elapsedSeconds
+        ),
+        triggered: false
+      }
+    : null;
+
+  if (autoState && autoState.remaining <= 0 && !autoState.triggered) {
+    autoState.triggered = true;
+    doAutoTransition();
+    return;
+  }
+
+  renderHintsAndAutoState(hintsState, autoState, hasHints, hasAutoTransition);
+
+  hintsInterval = setInterval(() => {
+    hintsState.forEach(hint => {
+      if (hint.remaining > 0) {
+        hint.remaining -= 1;
+      }
+    });
+
+    if (autoState && autoState.remaining > 0) {
+      autoState.remaining -= 1;
+    }
+
+    renderHintsAndAutoState(hintsState, autoState, hasHints, hasAutoTransition);
+
+    if (autoState && autoState.remaining <= 0 && !autoState.triggered) {
+      autoState.triggered = true;
+      doAutoTransition();
+      return;
+    }
+
+    const allHintsOpened = hintsState.every(hint => hint.remaining <= 0);
+    const autoFinished = !autoState || autoState.remaining <= 0;
+
+    if (allHintsOpened && autoFinished) {
+      clearInterval(hintsInterval);
+      hintsInterval = null;
+    }
+  }, 1000);
+}
+
+function renderHintsAndAutoState(hintsState, autoState, hasHints, hasAutoTransition) {
+  const container = document.getElementById("hintsContent");
+
+  let hintsHtml = "";
+
+  if (!hasHints) {
+    hintsHtml += `
+      <div class="hint-timer">
+        Підказки у цьому завданні не передбачені.
+      </div>
+    `;
+  } else {
+    hintsHtml += hintsState.map(hint => {
+      if (hint.remaining > 0) {
+        return `
+          <div class="hint-timer">
+            До підказки №${hint.sort_order} залишилось:
+            <strong>${formatSeconds(hint.remaining)}</strong>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="hint">
+          <strong>Підказка №${hint.sort_order}:</strong>
+          <p>${escapeHtml(hint.content).replaceAll("\\n", "<br>")}</p>
+        </div>
+      `;
+    }).join("");
+  }
+
+  let autoHtml = "";
+
+  if (!hasAutoTransition) {
+    autoHtml = `
+      <div class="hint-timer">
+        Автоперехід у цьому завданні не передбачений.
+      </div>
+    `;
+  } else {
+    autoHtml = `
+      <div class="hint-timer auto-transition-timer">
+        До автопереходу залишилось:
+        <strong>${formatSeconds(autoState.remaining)}</strong>
+      </div>
+    `;
+  }
+
+  container.innerHTML = hintsHtml + autoHtml;
+}
+
+async function doAutoTransition() {
+  showPlainAnswerMessage("Час вийшов. Переходимо далі...", "neutral");
+
+  const response = await fetch(`/api/play/${pin}/auto-transition`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      task_id: currentTask ? currentTask.id : null
+    })
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    showPlainAnswerMessage(result.error || "Помилка автопереходу", "error");
+    return;
+  }
+
+  showPlainAnswerMessage(result.message || "Автоперехід виконано", "neutral");
+
+  setTimeout(() => {
+    window.location.reload();
+  }, 1200);
+}
+
+function renderCodeMessages(results) {
+
+  return results.map(item => {
+
+    let cssClass = "";
+
+    if (item.status === "accepted") {
+      cssClass = "answer-success";
+    }
+    else if (item.status === "repeated") {
+      cssClass = "answer-repeat";
+    }
+    else {
+      cssClass = "answer-error";
+    }
+
+    return `
+      <span class="${cssClass}">
+        ${escapeHtml(item.message)}
+      </span>
+    `;
+
+  }).join(", ");
+}
+
+function showAnswerMessage(html) {
+  const message = document.getElementById("answerMessage");
+
+  message.innerHTML = html;
+
+  setTimeout(() => {
+    message.innerHTML = "";
+  }, 3000);
+}
+
+function showPlainAnswerMessage(text, type) {
+  const cssClass =
+    type === "success"
+      ? "answer-success"
+      : type === "error"
+        ? "answer-error"
+        : "answer-repeat";
+
+  showAnswerMessage(`
+    <span class="${cssClass}">
+      ${escapeHtml(text)}
+    </span>
+  `);
+}
+
+function showTeamNameMessage(text, type) {
+  const message = document.getElementById("teamNameMessage");
+
+  message.textContent = text;
+
+  if (type === "success") {
+    message.style.color = "#22c55e";
+  } else {
+    message.style.color = "#ef4444";
+  }
+
+  setTimeout(() => {
+    message.textContent = "";
+  }, 3000);
+}
+
+async function submitAnswer() {
+  const input = document.getElementById("answerInput");
+  const answer = input.value.trim();
+
+  if (!answer) {
+    showPlainAnswerMessage("Введіть код", "error");
+    return;
+  }
+
+  const response = await fetch(`/api/play/${pin}/answer`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ answer })
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    showPlainAnswerMessage(result.error || "Помилка", "error");
+    return;
+  }
+
+  if (Array.isArray(result.results)) {
+    showAnswerMessage(
+      renderCodeMessages(result.results)
+    );
+  } else if (!result.accepted) {
+    showPlainAnswerMessage(`Код ${answer.toUpperCase()} не прийнято`, "error");
+    return;
+  }
+
+  input.value = "";
+
+  if (Array.isArray(result.found_items)) {
+    result.found_items.forEach(foundItem => {
+      const alreadyExists = currentFoundAnswers.some(item =>
+        Number(item.task_answer_id || item.id) === Number(foundItem.id)
+      );
+
+      if (!alreadyExists) {
+        currentFoundAnswers.push({
+          task_answer_id: foundItem.id,
+          answer_text: foundItem.answer_text,
+          answer_type: foundItem.answer_type,
+          description: foundItem.description,
+          comment: foundItem.comment,
+          sort_order: foundItem.sort_order,
+          time_modifier_seconds: foundItem.time_modifier_seconds
+        });
+      }
+    });
+
+    renderFormat();
+  } else if (result.found) {
+    currentFoundAnswers.push({
+      task_answer_id: result.found.id,
+      answer_text: result.found.answer_text,
+      answer_type: result.found.answer_type,
+      description: result.found.description,
+      comment: result.found.comment,
+      sort_order: result.found.sort_order,
+      time_modifier_seconds: result.found.time_modifier_seconds
+    });
+
+    renderFormat();
+  }
+
+  if (result.task_completed) {
+    showPlainAnswerMessage(result.message, "success");
+
+    setTimeout(() => {
+      loadGame();
+    }, 1200);
+  }
+}
+
+function openTeamNameEdit() {
+  document.getElementById("teamNameInput").value = currentTeamName;
+  document.getElementById("teamNameEditBlock").classList.remove("hidden");
+  document.getElementById("teamNameInput").focus();
+}
+
+function closeTeamNameEdit() {
+  document.getElementById("teamNameEditBlock").classList.add("hidden");
+  document.getElementById("teamNameMessage").textContent = "";
+}
+
+async function saveTeamName() {
+  const input = document.getElementById("teamNameInput");
+  const name = input.value.trim();
+
+  if (!name) {
+    showTeamNameMessage("Введіть назву команди", "error");
+    return;
+  }
+
+  const response = await fetch(`/api/play/${pin}/team-name`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ name })
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    showTeamNameMessage(result.error || "Помилка", "error");
+    return;
+  }
+
+  currentTeamName = result.team_name;
+  document.getElementById("teamNameDisplay").textContent = currentTeamName;
+  document.getElementById("teamNameInput").value = currentTeamName;
+
+  showTeamNameMessage("✓ Назву команди збережено", "success");
+
+  setTimeout(() => {
+    closeTeamNameEdit();
+  }, 700);
+}
+
+document.getElementById("submitAnswerBtn").addEventListener("click", submitAnswer);
+
+document.getElementById("answerInput").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    document.getElementById("submitAnswerBtn").click();
+  }
+});
+
+document.getElementById("editTeamNameBtn").addEventListener("click", openTeamNameEdit);
+document.getElementById("cancelTeamNameBtn").addEventListener("click", closeTeamNameEdit);
+document.getElementById("saveTeamNameBtn").addEventListener("click", saveTeamName);
+
+document.getElementById("teamNameInput").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    saveTeamName();
+  }
+
+  if (event.key === "Escape") {
+    closeTeamNameEdit();
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    loadGame();
+  }
+});
+
+window.addEventListener("focus", () => {
+  loadGame();
+});
+
+loadGame();
+</script>
+
+</body>
+</html>

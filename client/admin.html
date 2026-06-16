@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quest Engine — Адмінка</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <section class="card">
+      <h1>Quest Engine</h1>
+      <p id="userInfo">Перевіряємо авторизацію...</p>
+
+      <button id="logoutBtn">Вийти</button>
+
+      <hr />
+
+      <h2>Створити гру</h2>
+
+      <input id="gameTitle" type="text" placeholder="Назва гри" />
+      <input id="gameDescription" type="text" placeholder="Короткий опис" />
+
+      <select id="gameLanguage">
+        <option value="uk">Українська</option>
+        <option value="en">English</option>
+      </select>
+
+      <select id="gameType">
+        <option value="LINEAR">LINEAR — лінійний квест</option>
+        <option value="STORM">STORM — штурм</option>
+        <option value="CUSTOM">CUSTOM — кастомна логіка</option>
+      </select>
+
+      <select id="winnerType">
+        <option value="TIME">TIME — переможець за часом</option>
+        <option value="POINTS">POINTS — переможець за балами</option>
+      </select>
+
+      <button id="createGameBtn">Створити гру</button>
+
+      <p id="message"></p>
+
+      <hr />
+
+      <h2>Мої ігри</h2>
+      <div id="gamesList">Завантаження...</div>
+    </section>
+  </main>
+
+  <script>
+    async function checkAuth() {
+      const response = await fetch("/api/auth/me");
+      const result = await response.json();
+
+      if (!response.ok || !result.user) {
+        window.location.href = "/login.html";
+        return null;
+      }
+
+      document.getElementById("userInfo").textContent =
+        `Ви увійшли як: ${result.user.name} (${result.user.role})`;
+
+      return result.user;
+    }
+
+    async function loadGames() {
+      const response = await fetch("/api/games");
+      const result = await response.json();
+
+      const gamesList = document.getElementById("gamesList");
+
+      if (!response.ok) {
+        gamesList.textContent = result.error || "Помилка завантаження ігор";
+        return;
+      }
+
+      if (!result.games.length) {
+        gamesList.textContent = "Ігор поки немає.";
+        return;
+      }
+
+      gamesList.innerHTML = result.games.map(game => `
+        <div class="info-block">
+          <h3>${game.title}</h3>
+          <p>${game.description || ""}</p>
+          <p>
+            Статус: <strong>${game.status}</strong><br>
+            Механіка: <strong>${game.game_type}</strong><br>
+            Переможець: <strong>${game.winner_type}</strong><br>
+            Мова: <strong>${game.language}</strong>
+          </p>
+          <p>
+  <a href="/game.html?id=${game.id}">
+    <button>Редагувати гру</button>
+  </a>
+
+  <a href="/runs.html?id=${game.id}">
+    <button>Переглянути запуски</button>
+  </a>
+</p>
+        </div>
+      `).join("");
+    }
+
+    document.getElementById("createGameBtn").addEventListener("click", async () => {
+      const payload = {
+        title: document.getElementById("gameTitle").value,
+        description: document.getElementById("gameDescription").value,
+        language: document.getElementById("gameLanguage").value,
+        game_type: document.getElementById("gameType").value,
+        winner_type: document.getElementById("winnerType").value
+      };
+
+      const response = await fetch("/api/games", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        document.getElementById("message").textContent =
+          result.error || "Помилка створення гри";
+        return;
+      }
+
+      document.getElementById("message").textContent = "Гру створено";
+      document.getElementById("gameTitle").value = "";
+      document.getElementById("gameDescription").value = "";
+
+      loadGames();
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await fetch("/api/auth/logout", { method: "POST" });
+      window.location.href = "/login.html";
+    });
+
+    checkAuth().then(() => loadGames());
+  </script>
+</body>
+</html>

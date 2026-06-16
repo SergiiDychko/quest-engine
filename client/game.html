@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Редагування гри</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <section class="card">
+      <a href="/admin.html">← Назад</a>
+
+      <h1 id="gameTitle">Завантаження...</h1>
+      <p id="gameMeta"></p>
+
+      <hr />
+
+      <h2>Сторінки гри</h2>
+
+      <div id="gamePageTabs" class="game-page-tabs">
+        Завантаження...
+      </div>
+
+      <div class="add-task-row">
+        <button id="addTaskBtn">+ Додати завдання</button>
+        <span id="addTaskMessage"></span>
+      </div>
+
+      <div id="tabContent" class="game-tab-content">
+        Завантаження...
+      </div>
+
+      <p id="message"></p>
+    </section>
+  </main>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const gameId = params.get("id");
+
+let currentGame = null;
+let currentTasks = [];
+let currentPages = {};
+let activeTab = "START";
+
+const pageLabels = {
+  START: "Стартова",
+  JOIN: "Реєстрація команди",
+  FINISH: "Фінальна"
+};
+
+async function checkAuth() {
+  const response = await fetch("/api/auth/me");
+  const result = await response.json();
+
+  if (!response.ok || !result.user) {
+    window.location.href = "/login.html";
+  }
+}
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+async function loadGame() {
+  const response = await fetch(`/api/games/${gameId}`);
+  const result = await response.json();
+
+  if (!response.ok) {
+    document.getElementById("gameTitle").textContent =
+      result.error || "Помилка завантаження гри";
+    return;
+  }
+
+  currentGame = result.game;
+
+  document.getElementById("gameTitle").textContent = currentGame.title;
+  document.getElementById("gameMeta").innerHTML = `
+    Статус: <strong>${currentGame.status}</strong><br>
+    Механіка: <strong>${currentGame.game_type}</strong><br>
+    Переможець: <strong>${currentGame.winner_type}</strong><br>
+    Мова: <strong>${currentGame.language}</strong>
+  `;
+}
+
+async function loadTasks() {
+  const response = await fetch(`/api/games/${gameId}/tasks`);
+  const result = await response.json();
+
+  if (!response.ok) {
+    document.getElementById("tabContent").textContent =
+      result.error || "Помилка завантаження завдань";
+    return;
+  }
+
+  currentTasks = result.tasks || [];
+}
+
+async function loadPages() {
+  const response = await fetch(`/api/pages/game/${gameId}`);
+  const result = await response.json();
+
+  if (!response.ok) {
+    document.getElementById("tabContent").textContent =
+      result.error || "Помилка завантаження сторінок гри";
+    return;
+  }
+
+  currentPages = result.pages || {};
+}
+
+function buildTabs() {
+  const container = document.getElementById("gamePageTabs");
+
+  const tabs = [];
+
+  tabs.push({
+    type: "page",
+    key: "START",
+    label: pageLabels.START
+  });
+
+  tabs.push({
+    type: "page",
+    key: "JOIN",
+    label: pageLabels.JOIN
+  });
+
+  currentTasks.forEach(task => {
+    tabs.push({
+      type: "task",
+      key: `TASK_${task.id}`,
+      task,
+      label: `Завдання ${task.sort_order}`
+    });
+  });
+
+  tabs.push({
+    type: "page",
+    key: "FINISH",
+    label: pageLabels.FINISH
+  });
+
+  container.innerHTML = tabs.map(tab => `
+    <button
+      class="game-page-tab ${activeTab === tab.key ? "active" : ""}"
+      data-tab="${tab.key}"
+    >
+      ${escapeHtml(tab.label)}
+    </button>
+  `).join("");
+
+  document.querySelectorAll(".game-page-tab").forEach(button => {
+    button.addEventListener("click", () => {
+      activeTab = button.dataset.tab;
+      render();
+    });
+  });
+}
+
+function render() {
+  buildTabs();
+
+  if (activeTab === "START" || activeTab === "JOIN" || activeTab === "FINISH") {
+    renderSystemPage(activeTab);
+    return;
+  }
+
+  if (activeTab.startsWith("TASK_")) {
+    const taskId = Number(activeTab.replace("TASK_", ""));
+    const task = currentTasks.find(item => Number(item.id) === taskId);
+
+    if (!task) {
+      activeTab = "START";
+      render();
+      return;
+    }
+
+    renderTaskTab(task);
+  }
+}
+
+function renderSystemPage(pageType) {
+  const page = currentPages[pageType] || {
+    page_type: pageType,
+    title: "",
+    content: "",
+    custom_css: ""
+  };
+
+  const content = document.getElementById("tabContent");
+
+  content.innerHTML = `
+    <div class="info-block page-editor-block">
+      <h2>${escapeHtml(pageLabels[pageType])}</h2>
+
+      <div class="form-row">
+        <label>Заголовок сторінки</label>
+        <input
+          id="pageTitleInput"
+          type="text"
+          value="${escapeHtml(page.title || "")}"
+        >
+      </div>
+
+      <label>Текст сторінки</label>
+      <textarea
+        id="pageContentInput"
+        rows="8"
+        placeholder="Текст, який побачать гравці"
+      >${escapeHtml(page.content || "")}</textarea>
+
+      <label>CSS для цієї сторінки</label>
+      <textarea
+        id="pageCssInput"
+        rows="6"
+        placeholder="Необовʼязково. CSS лише для цієї сторінки."
+      >${escapeHtml(page.custom_css || "")}</textarea>
+
+      <div class="save-row">
+        <button id="savePageBtn">Зберегти сторінку</button>
+        <span id="savePageMessage"></span>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("savePageBtn").addEventListener("click", () => {
+    saveSystemPage(pageType);
+  });
+}
+
+async function saveSystemPage(pageType) {
+  const payload = {
+    title: document.getElementById("pageTitleInput").value.trim(),
+    content: document.getElementById("pageContentInput").value,
+    custom_css: document.getElementById("pageCssInput").value
+  };
+
+  const response = await fetch(`/api/pages/game/${gameId}/${pageType}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const result = await response.json();
+  const message = document.getElementById("savePageMessage");
+
+  if (!response.ok) {
+    message.className = "";
+    message.textContent = result.error || "Помилка збереження сторінки";
+    return;
+  }
+
+  message.className = "success-message";
+  message.textContent = "✓ Сторінку збережено";
+
+  setTimeout(() => {
+    message.textContent = "";
+  }, 3000);
+
+  await loadPages();
+  render();
+}
+
+function renderTaskTab(task) {
+  const content = document.getElementById("tabContent");
+
+  content.innerHTML = `
+    <iframe
+      class="task-editor-frame"
+      src="/task.html?id=${task.id}&game=${gameId}"
+      title="Редактор завдання"
+    ></iframe>
+  `;
+}
+
+document.getElementById("addTaskBtn").addEventListener("click", async () => {
+  const nextNumber = currentTasks.length + 1;
+
+  const response = await fetch(`/api/games/${gameId}/tasks`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      title: `Завдання ${nextNumber}`,
+      task_type: "STANDARD"
+    })
+  });
+
+  const result = await response.json();
+  const message = document.getElementById("addTaskMessage");
+
+  if (!response.ok) {
+    message.className = "";
+    message.textContent = result.error || "Помилка створення завдання";
+    return;
+  }
+
+  message.className = "success-message";
+  message.textContent = "✓ Завдання створено";
+
+  setTimeout(() => {
+    message.textContent = "";
+  }, 3000);
+
+  await loadTasks();
+
+  const newTask = currentTasks[currentTasks.length - 1];
+
+  if (newTask) {
+    activeTab = `TASK_${newTask.id}`;
+  }
+
+  render();
+});
+
+async function init() {
+  await checkAuth();
+  await loadGame();
+  await loadPages();
+  await loadTasks();
+  render();
+}
+
+init();
+</script>
+</body>
+</html>

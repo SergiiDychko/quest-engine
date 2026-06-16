@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Запуск гри</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+  <div class="card">
+
+    <a href="javascript:history.back()">← Назад</a>
+
+    <h1 id="runTitle">Запуск гри</h1>
+
+    <div class="info-block">
+      <h2>Налаштування запуску</h2>
+
+      <div class="form-row">
+        <label>Назва запуску</label>
+        <input id="runNameInput" type="text">
+      </div>
+
+      <div class="form-row">
+        <label>Дата старту</label>
+        <input id="runStartDate" type="date">
+
+        <label style="min-width:auto">Час старту</label>
+        <input id="runStartTime" type="time">
+      </div>
+
+      <div class="form-row">
+        <label>Дата завершення</label>
+        <input id="runFinishDate" type="date">
+
+        <label style="min-width:auto">Час завершення</label>
+        <input id="runFinishTime" type="time">
+      </div>
+
+      <div class="form-row">
+        <label>Статус</label>
+        <select id="runStatusInput">
+          <option value="DRAFT">DRAFT — запланований</option>
+          <option value="ACTIVE">ACTIVE — активний</option>
+          <option value="ARCHIVED">ARCHIVED — архівний</option>
+        </select>
+      </div>
+
+      <div class="save-row">
+        <button id="saveRunBtn">Зберегти запуск</button>
+        <span id="saveRunMessage"></span>
+      </div>
+    </div>
+
+    <hr>
+
+    <h2>Посилання для реєстрації команд</h2>
+
+    <input id="joinLink" type="text" readonly>
+
+    <button id="copyJoinLinkBtn">Скопіювати</button>
+    <button id="openJoinLinkBtn">Відкрити</button>
+    <span id="copyJoinMessage"></span>
+
+    <hr>
+
+    <h2>Команди</h2>
+    <p id="teamsCount">Команд зареєстровано: 0</p>
+
+    <div id="teamsTableBlock" class="teams-table-wrapper">
+      Завантаження команд...
+    </div>
+
+    <hr>
+
+    <button id="duplicateRunBtn">Створити копію запуску</button>
+
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const runId = params.get("id");
+
+let currentRun = null;
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function splitDateTime(value) {
+  if (!value) {
+    return { date: "", time: "" };
+  }
+
+  const parts = value.split(" ");
+  return {
+    date: parts[0] || "",
+    time: parts[1] || ""
+  };
+}
+
+function joinDateTime(date, time) {
+  if (!date || !time) {
+    return null;
+  }
+
+  return `${date} ${time}`;
+}
+
+function getJoinUrl() {
+  return `${window.location.origin}/join.html?run=${currentRun.run_code}`;
+}
+
+function getPlayUrl(pin) {
+  return `${window.location.origin}/play.html?pin=${pin}`;
+}
+
+async function loadRun() {
+  const response = await fetch(`/api/runs/${runId}`);
+  const result = await response.json();
+
+  if (!response.ok) {
+    document.getElementById("runTitle").textContent =
+      result.error || "Помилка завантаження запуску";
+    return;
+  }
+
+  currentRun = result.run;
+
+  document.getElementById("runTitle").textContent = currentRun.title;
+
+  document.getElementById("runNameInput").value = currentRun.title || "";
+  document.getElementById("runStatusInput").value = currentRun.status || "DRAFT";
+
+  const start = splitDateTime(currentRun.started_at);
+  document.getElementById("runStartDate").value = start.date;
+  document.getElementById("runStartTime").value = start.time;
+
+  const finish = splitDateTime(currentRun.finished_at);
+  document.getElementById("runFinishDate").value = finish.date;
+  document.getElementById("runFinishTime").value = finish.time;
+
+  document.getElementById("teamsCount").textContent =
+    `Команд зареєстровано: ${currentRun.teams_count || 0}`;
+
+  document.getElementById("joinLink").value = getJoinUrl();
+
+  loadTeams();
+}
+
+async function loadTeams() {
+  const response = await fetch(`/api/runs/${runId}/teams`);
+  const result = await response.json();
+
+  const block = document.getElementById("teamsTableBlock");
+
+  if (!response.ok) {
+    block.textContent = result.error || "Помилка завантаження команд";
+    return;
+  }
+
+  const teams = result.teams || [];
+
+  document.getElementById("teamsCount").textContent =
+    `Команд зареєстровано: ${teams.length}`;
+
+  if (!teams.length) {
+    block.innerHTML = "<p>Команд поки немає.</p>";
+    return;
+  }
+
+  block.innerHTML = `
+    <table class="codes-table">
+      <thead>
+        <tr>
+          <th>Назва команди</th>
+          <th>PIN</th>
+          <th>Посилання на гру</th>
+          <th>Дії</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${teams.map(team => {
+          const playUrl = getPlayUrl(team.pin);
+
+          return `
+            <tr>
+              <td>${escapeHtml(team.name)}</td>
+              <td><strong>${escapeHtml(team.pin)}</strong></td>
+              <td>
+                <input
+                  id="team-link-${team.id}"
+                  type="text"
+                  value="${escapeHtml(playUrl)}"
+                  readonly
+                >
+                <button onclick="copyTeamLink(${team.id})">
+                  Скопіювати посилання на гру
+                </button>
+                <span id="team-copy-message-${team.id}"></span>
+              </td>
+              <td>
+                <button onclick="deleteTeam(${team.id}, '${escapeHtml(team.name)}')">
+                  Видалити
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function copyTeamLink(teamId) {
+  const input = document.getElementById(`team-link-${teamId}`);
+  await navigator.clipboard.writeText(input.value);
+
+  const message = document.getElementById(`team-copy-message-${teamId}`);
+  message.className = "success-message";
+  message.textContent = "✓ Скопійовано";
+
+  setTimeout(() => {
+    message.textContent = "";
+  }, 3000);
+}
+
+async function deleteTeam(teamId, teamName) {
+const confirmed = confirm(
+  `Видалити команду "${teamName}"? Цю дію неможливо скасувати.`
+);
+
+  if (!confirmed) {
+    return;
+  }
+
+  const response = await fetch(`/api/runs/${runId}/teams/${teamId}`, {
+    method: "DELETE"
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    alert(result.error || "Помилка видалення команди");
+    return;
+  }
+
+  loadRun();
+}
+
+document.getElementById("saveRunBtn").addEventListener("click", async () => {
+  const title = document.getElementById("runNameInput").value.trim();
+
+  const started_at = joinDateTime(
+    document.getElementById("runStartDate").value,
+    document.getElementById("runStartTime").value
+  );
+
+  const finished_at = joinDateTime(
+    document.getElementById("runFinishDate").value,
+    document.getElementById("runFinishTime").value
+  );
+
+  const status = document.getElementById("runStatusInput").value;
+
+  if (!title) {
+    alert("Вкажіть назву запуску");
+    return;
+  }
+
+  const response = await fetch(`/api/runs/${runId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      title,
+      status,
+      started_at,
+      finished_at
+    })
+  });
+
+  const result = await response.json();
+
+  const message = document.getElementById("saveRunMessage");
+
+  if (response.ok) {
+    message.className = "success-message";
+    message.textContent = "✓ Запуск успішно збережено";
+
+    setTimeout(() => {
+      message.textContent = "";
+    }, 3000);
+  } else {
+    message.className = "";
+    message.textContent = result.error;
+  }
+
+  loadRun();
+});
+
+document.getElementById("copyJoinLinkBtn").addEventListener("click", async () => {
+  const link = document.getElementById("joinLink").value;
+  await navigator.clipboard.writeText(link);
+
+  const message = document.getElementById("copyJoinMessage");
+  message.className = "success-message";
+  message.textContent = "✓ Посилання скопійовано";
+
+  setTimeout(() => {
+    message.textContent = "";
+  }, 3000);
+});
+
+document.getElementById("openJoinLinkBtn").addEventListener("click", () => {
+  const link = document.getElementById("joinLink").value;
+  window.open(link, "_blank");
+});
+
+document.getElementById("duplicateRunBtn").addEventListener("click", () => {
+  alert("Копіювання запуску зробимо наступним кроком");
+});
+
+loadRun();
+</script>
+
+</body>
+</html>

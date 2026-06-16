@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Редагування завдання</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main class="app">
+  <div class="card">
+    <div class="task-settings-header">
+
+  <div class="task-name-row">
+
+    <label id="taskNumberLabel">
+      Завдання
+    </label>
+
+    <input
+      id="taskNameInput"
+      type="text"
+      class="task-name-input"
+    >
+
+    <button
+      id="saveTaskNameBtn"
+      class="icon-btn"
+      title="Зберегти назву"
+    >
+      ✏️
+    </button>
+
+    <span id="saveTaskNameMessage"></span>
+
+  </div>
+
+  <div class="task-type-row">
+
+    <label>Тип завдання:</label>
+
+    <select id="taskTypeSelect">
+      <option value="STANDARD">
+        STANDARD — звичайне завдання
+      </option>
+
+      <option value="OLYMPIAD">
+        OLYMPIAD — олімпійка
+      </option>
+    </select>
+
+  </div>
+
+  <div class="task-actions-row">
+
+    <button
+      id="deleteTaskBtn"
+      class="danger-btn"
+    >
+      Видалити завдання
+    </button>
+
+  </div>
+
+</div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="contentTab">Контент</button>
+      <button class="tab-btn" data-tab="codesTab">Коди</button>
+      <button class="tab-btn" data-tab="hintsTab">Підказки</button>
+      <button class="tab-btn" data-tab="autoTab">Автоперехід</button>
+    </div>
+
+    <section id="contentTab" class="tab-panel">
+      <h2>Контент завдання</h2>
+      <div id="contentList">Завантаження...</div>
+
+      <hr />
+
+      <h3>Додати текстовий блок</h3>
+      <textarea id="newTextContent" rows="6" placeholder="Текст завдання"></textarea>
+      <button id="addTextContentBtn">Додати текст</button>
+    </section>
+
+    <section id="codesTab" class="tab-panel hidden">
+      <h2>Коди завдання</h2>
+      <div id="codesList">Завантаження...</div>
+
+      <hr />
+
+      <h2>Додати коди</h2>
+      <div class="add-codes-row">
+        <input id="codesCount" type="number" value="1" min="1" />
+        <select id="codesType">
+          <option value="MAIN">Основні</option>
+          <option value="BONUS">Бонусні</option>
+          <option value="PENALTY">Штрафні</option>
+        </select>
+        <button id="addCodesBtn">Додати ще</button>
+      </div>
+    </section>
+
+    <section id="hintsTab" class="tab-panel hidden">
+      <h2>Підказки</h2>
+      <div id="hintsList">Завантаження...</div>
+      <button onclick="addHint()">Додати підказку</button>
+    </section>
+
+    <section id="autoTab" class="tab-panel hidden">
+      <h2>Автоперехід</h2>
+
+      <div class="info-block auto-transition-block">
+        <label class="auto-row">
+          <input id="autoTransitionEnabled" type="checkbox" />
+          <span>Увімкнути автоперехід</span>
+        </label>
+
+        <label class="auto-row">
+          <span>Час до автопереходу (секунди)</span>
+          <input id="autoTransitionMinutes" type="number" min="1" value="1800" />
+        </label>
+
+        <label class="auto-row">
+          <span>Призначити штраф за автоперехід (секунди)</span>
+          <input id="autoTransitionPenalty" type="number" min="0" value="0" />
+        </label>
+
+        <div class="auto-row">
+          <button id="saveAutoTransitionBtn">Зберегти автоперехід</button>
+        </div>
+      </div>
+    </section>
+
+    <p id="message"></p>
+  </div>
+</main>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const taskId = params.get("id");
+const gameId = params.get("game");
+
+let currentTask = null;
+let currentAnswers = [];
+let currentHints = [];
+
+document.querySelectorAll(".tab-btn").forEach(button => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.add("hidden"));
+
+    button.classList.add("active");
+    document.getElementById(button.dataset.tab).classList.remove("hidden");
+  });
+});
+
+async function loadTask() {
+  const response = await fetch(`/api/tasks/${taskId}`);
+  const result = await response.json();
+
+  if (!response.ok) {
+    document.getElementById("taskTitle").textContent =
+      result.error || "Помилка завантаження";
+    return;
+  }
+
+  currentTask = result.task;
+  currentAnswers = result.answers;
+
+  document.getElementById("taskNumberLabel").textContent =
+  `Завдання ${currentTask.sort_order}:`;
+
+document.getElementById("taskNameInput").value =
+  currentTask.title || "";
+
+document.getElementById("taskTypeSelect").value =
+  currentTask.task_type || "STANDARD";
+
+  renderCodes(currentAnswers);
+  renderAutoTransition();
+}
+
+document.getElementById("saveTaskNameBtn").addEventListener("click", async () => {
+  const title = document.getElementById("taskNameInput").value.trim();
+
+  if (!title) {
+    alert("Вкажіть назву завдання");
+    return;
+  }
+
+  const response = await fetch(`/api/tasks/${taskId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+  title,
+  task_type:
+    document.getElementById("taskTypeSelect").value
+})
+  });
+
+  const result = await response.json();
+  const message = document.getElementById("saveTaskNameMessage");
+
+  if (response.ok) {
+    message.className = "success-message";
+    message.textContent = "✓ Назву збережено";
+
+    setTimeout(() => {
+      message.textContent = "";
+    }, 3000);
+  } else {
+    message.className = "";
+    message.textContent = result.error;
+  }
+
+  loadTask();
+});
+
+document
+  .getElementById("taskTypeSelect")
+  .addEventListener("change", async () => {
+
+    const response =
+      await fetch(`/api/tasks/${taskId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          title:
+            document.getElementById("taskNameInput").value.trim(),
+          task_type:
+            document.getElementById("taskTypeSelect").value
+        })
+      });
+
+    if (response.ok) {
+      loadTask();
+    }
+
+  });
+
+  document
+  .getElementById("deleteTaskBtn")
+  .addEventListener("click", async () => {
+
+    const confirmed =
+      confirm(
+        "Видалити це завдання?\n\nЦю дію неможливо скасувати."
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const response =
+      await fetch(`/api/tasks/${taskId}`, {
+        method: "DELETE"
+      });
+
+    const result =
+      await response.json();
+
+    if (!response.ok) {
+      alert(result.error);
+      return;
+    }
+
+    window.parent.location.reload();
+  });
+
+async function loadContent() {
+  const response = await fetch(`/api/task-content/${taskId}`);
+  const result = await response.json();
+
+  const contentList = document.getElementById("contentList");
+
+  if (!response.ok) {
+    contentList.textContent = result.error || "Помилка завантаження контенту";
+    return;
+  }
+
+  if (!result.content.length) {
+    contentList.textContent = "Контенту поки немає.";
+    return;
+  }
+
+  contentList.innerHTML = result.content.map(item => `
+    <div class="info-block">
+      <p><strong>${item.sort_order}. ${item.type}</strong></p>
+
+      <textarea id="content-${item.id}" rows="6">${escapeHtml(item.content)}</textarea>
+
+      <button onclick="saveContentItem(${item.id})">Зберегти блок</button>
+      <button onclick="deleteContentItem(${item.id})">Видалити блок</button>
+    </div>
+  `).join("");
+}
+
+document.getElementById("addTextContentBtn").addEventListener("click", async () => {
+  const content = document.getElementById("newTextContent").value.trim();
+
+  if (!content) {
+    document.getElementById("message").textContent = "Введіть текст";
+    return;
+  }
+
+  const response = await fetch(`/api/task-content/${taskId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "TEXT",
+      content
+    })
+  });
+
+  const result = await response.json();
+
+  document.getElementById("message").textContent =
+    response.ok ? "Текст додано" : result.error;
+
+  document.getElementById("newTextContent").value = "";
+  loadContent();
+});
+
+async function saveContentItem(contentId) {
+  const content = document.getElementById(`content-${contentId}`).value;
+
+  const response = await fetch(`/api/task-content/item/${contentId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content })
+  });
+
+  const result = await response.json();
+
+  document.getElementById("message").textContent =
+    response.ok ? `Блок збережено о ${new Date().toLocaleTimeString()}` : result.error;
+
+  loadContent();
+}
+
+async function deleteContentItem(contentId) {
+  const confirmed = confirm("Видалити цей текстовий блок?");
+  if (!confirmed) return;
+
+  const response = await fetch(`/api/task-content/item/${contentId}`, {
+    method: "DELETE"
+  });
+
+  const result = await response.json();
+
+  document.getElementById("message").textContent =
+    response.ok ? "Блок видалено" : result.error;
+
+  loadContent();
+}
+
+async function loadHints() {
+  const response = await fetch(`/api/task-hints/${taskId}`);
+  const result = await response.json();
+
+  const hintsList = document.getElementById("hintsList");
+
+  if (!response.ok) {
+    hintsList.textContent = result.error || "Помилка завантаження підказок";
+    return;
+  }
+
+  currentHints = result.hints;
+
+  if (!currentHints.length) {
+    hintsList.textContent = "Підказок поки немає.";
+    return;
+  }
+
+  hintsList.innerHTML = currentHints.map(hint => `
+    <div class="info-block">
+      <p><strong>Підказка №${hint.sort_order}</strong></p>
+
+      <label>
+        Через (секунд):
+        <input
+          type="number"
+          id="hint-seconds-${hint.id}"
+          value="${hint.show_after_seconds}"
+        >
+      </label>
+
+      <textarea id="hint-content-${hint.id}" rows="4">${escapeHtml(hint.content || "")}</textarea>
+
+      <button onclick="saveHint(${hint.id})">Зберегти підказку</button>
+      <button onclick="deleteHint(${hint.id})">Видалити підказку</button>
+    </div>
+  `).join("");
+}
+
+async function addHint() {
+  const response = await fetch(`/api/task-hints/${taskId}`, {
+    method: "POST"
+  });
+
+  const result = await response.json();
+
+  document.getElementById("message").textContent =
+    response.ok ? "Підказку додано" : result.error;
+
+  loadHints();
+}
+
+async function saveHint(hintId) {
+  const show_after_seconds =
+    document.getElementById(`hint-seconds-${hintId}`).value;
+
+  const content =
+    document.getElementById(`hint-content-${hintId}`).value;
+
+  const response = await fetch(`/api/task-hints/${hintId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      show_after_seconds,
+      content
+    })
+  });
+
+  const result = await response.json();
+
+  document.getElementById("message").textContent =
+    response.ok ? "Підказку збережено" : result.error;
+
+  loadHints();
+}
+
+async function deleteHint(hintId) {
+  const confirmed = confirm("Видалити підказку?");
+  if (!confirmed) return;
+
+  const response = await fetch(`/api/task-hints/${hintId}`, {
+    method: "DELETE"
+  });
+
+  const result = await response.json();
+
+  document.getElementById("message").textContent =
+    response.ok ? "Підказку видалено" : result.error;
+
+  loadHints();
+}
+
+function renderAutoTransition() {
+  const enabled =
+    currentTask.auto_transition_minutes !== null &&
+    currentTask.auto_transition_minutes !== undefined;
+
+  document.getElementById("autoTransitionEnabled").checked = enabled;
+  document.getElementById("autoTransitionMinutes").value =
+    enabled ? currentTask.auto_transition_minutes : 30;
+  document.getElementById("autoTransitionPenalty").value =
+    currentTask.auto_transition_penalty_seconds || 0;
+}
+
+function renderCodes(answers) {
+  const list = document.getElementById("codesList");
+
+  const mainAnswers = answers.filter(a => a.answer_type === "MAIN");
+  const bonusAnswers = answers.filter(a => a.answer_type === "BONUS");
+  const penaltyAnswers = answers.filter(a => a.answer_type === "PENALTY");
+
+  const requiredBlock = mainAnswers.length > 1 ? `
+    <div class="info-block">
+      <h3>Умова проходження</h3>
+      <p>Основних кодів: <strong>${mainAnswers.length}</strong></p>
+      <label>
+        Для виконання завдання потрібно здати:
+        <input
+          id="requiredMainAnswers"
+          type="number"
+          min="1"
+          max="${mainAnswers.length}"
+          value="${currentTask.required_main_answers || mainAnswers.length}"
+        />
+      </label>
+    </div>
+  ` : "";
+
+  list.innerHTML = `
+    ${requiredBlock}
+    ${renderCodeTable("Основні коди", mainAnswers, false)}
+    ${renderCodeTable("Бонусні коди", bonusAnswers, true)}
+    ${renderCodeTable("Штрафні коди", penaltyAnswers, true)}
+    ${answers.length ? `<button id="saveAllCodesBtn">Зберегти всі коди</button>` : "Кодів поки немає."}
+  `;
+
+  const saveBtn = document.getElementById("saveAllCodesBtn");
+  if (saveBtn) saveBtn.addEventListener("click", saveAllCodes);
+}
+
+function renderCodeTable(title, answers, showSeconds) {
+  if (!answers.length) return "";
+
+  return `
+    <div class="info-block">
+      <h3>${title}</h3>
+
+      <table class="codes-table">
+        <thead>
+          <tr>
+            <th>№</th>
+            <th>Значення <button class="help-btn" title="Тут введіть правильну відповідь">?</button></th>
+            <th>Опис <button class="help-btn" title="Наприклад: одне слово, кирилиця">?</button></th>
+            <th>Коментар <button class="help-btn" title="Зʼявиться після здачі коду">?</button></th>
+            ${showSeconds ? `<th>Секунди <button class="help-btn" title="Для бонусів і штрафів вкажіть значення в секундах">?</button></th>` : ""}
+            <th class="delete-column"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${answers.map(answer => `
+            <tr>
+              <td>${answer.sort_order}</td>
+              <td><input data-id="${answer.id}" data-field="answer_text" value="${escapeHtml(answer.answer_text || "")}"></td>
+              <td><input data-id="${answer.id}" data-field="description" value="${escapeHtml(answer.description || "")}"></td>
+              <td><input data-id="${answer.id}" data-field="comment" value="${escapeHtml(answer.comment || "")}"></td>
+              ${showSeconds ? `
+                <td>
+                  <input
+                    data-id="${answer.id}"
+                    data-field="time_modifier_seconds"
+                    type="number"
+                    value="${answer.time_modifier_seconds || 0}"
+                  >
+                </td>
+              ` : ""}
+              <td class="delete-column">
+                <button class="delete-code-btn" onclick="deleteCode(${answer.id})">Видалити</button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+async function saveAllCodes() {
+  const answers = currentAnswers.map(answer => {
+    const timeInput = document.querySelector(
+      `[data-id="${answer.id}"][data-field="time_modifier_seconds"]`
+    );
+
+    return {
+      id: answer.id,
+      answer_type: answer.answer_type,
+      answer_text: document.querySelector(`[data-id="${answer.id}"][data-field="answer_text"]`).value,
+      description: document.querySelector(`[data-id="${answer.id}"][data-field="description"]`).value,
+      comment: document.querySelector(`[data-id="${answer.id}"][data-field="comment"]`).value,
+      time_modifier_seconds: timeInput ? timeInput.value : 0
+    };
+  });
+
+  const requiredInput = document.getElementById("requiredMainAnswers");
+
+  const response = await fetch(`/api/tasks/${taskId}/answers`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      required_main_answers: requiredInput ? requiredInput.value : 1,
+      answers
+    })
+  });
+
+  const result = await response.json();
+
+  document.getElementById("message").textContent =
+    response.ok ? `Коди збережено о ${new Date().toLocaleTimeString()}` : result.error;
+
+  loadTask();
+}
+
+async function deleteCode(answerId) {
+  const confirmed = confirm("Видалити цей код?");
+  if (!confirmed) return;
+
+  const response = await fetch(`/api/tasks/${taskId}/answers/${answerId}`, {
+    method: "DELETE"
+  });
+
+  const result = await response.json();
+
+  document.getElementById("message").textContent =
+    response.ok ? "Код видалено" : result.error;
+
+  loadTask();
+}
+
+document.getElementById("addCodesBtn").addEventListener("click", async () => {
+  const count = document.getElementById("codesCount").value;
+  const answer_type = document.getElementById("codesType").value;
+
+  const response = await fetch(`/api/tasks/${taskId}/answers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ count, answer_type })
+  });
+
+  const result = await response.json();
+
+  document.getElementById("message").textContent =
+    response.ok ? "Коди додано" : result.error;
+
+  loadTask();
+});
+
+document.getElementById("saveAutoTransitionBtn").addEventListener("click", async () => {
+  const auto_transition_enabled =
+    document.getElementById("autoTransitionEnabled").checked;
+
+  const auto_transition_minutes =
+    document.getElementById("autoTransitionMinutes").value;
+
+  const auto_transition_penalty_seconds =
+    document.getElementById("autoTransitionPenalty").value;
+
+  const response = await fetch(`/api/tasks/${taskId}/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      auto_transition_enabled,
+      auto_transition_minutes,
+      auto_transition_penalty_seconds
+    })
+  });
+
+  const result = await response.json();
+
+  document.getElementById("message").textContent =
+    response.ok ? "Автоперехід збережено" : result.error;
+
+  loadTask();
+});
+
+loadTask();
+loadContent();
+loadHints();
+</script>
+</body>
+</html>

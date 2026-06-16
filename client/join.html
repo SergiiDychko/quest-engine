@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Реєстрація команди</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+  <div class="card">
+
+    <div id="registrationBlock">
+
+      <h1 id="gameTitle">Завантаження...</h1>
+
+      <p>Введіть назву команди</p>
+
+      <input
+        id="teamName"
+        type="text"
+        placeholder="Наприклад: Месники"
+      >
+
+      <button id="createTeamBtn">
+        Створити команду
+      </button>
+
+      <p id="errorMessage"></p>
+
+    </div>
+
+    <div id="successBlock" class="hidden">
+
+      <h1>Вітаю, команду створено</h1>
+
+      <p>
+        <strong>Команда:</strong>
+        <span id="createdTeamName"></span>
+      </p>
+
+      <p>Посилання для учасників:</p>
+
+      <input
+        id="playLink"
+        type="text"
+        readonly
+      >
+
+      <p>
+        Передайте це посилання лише учасникам вашої команди.
+      </p>
+
+      <button id="copyLinkBtn">
+        Скопіювати
+      </button>
+
+      <button id="openPlayBtn">
+        Перейти в гру
+      </button>
+
+      <span id="copyMessage"></span>
+
+    </div>
+
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const runCode = params.get("run");
+
+let currentRun = null;
+let currentPlayLink = "";
+
+async function loadRun() {
+  const response = await fetch(`/api/join/${runCode}`);
+  const result = await response.json();
+
+  if (!response.ok) {
+    document.getElementById("gameTitle").textContent =
+      result.error || "Помилка";
+    return;
+  }
+
+  currentRun = result.run;
+
+  document.getElementById("gameTitle").textContent =
+    currentRun.game_title;
+}
+
+document
+  .getElementById("createTeamBtn")
+  .addEventListener("click", async () => {
+    const teamName =
+      document.getElementById("teamName").value.trim();
+
+    if (!teamName) {
+      alert("Вкажіть назву команди");
+      return;
+    }
+
+    const response = await fetch(`/api/join/${runCode}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        team_name: teamName
+      })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      document.getElementById("errorMessage").textContent =
+        result.error;
+      return;
+    }
+
+    document
+      .getElementById("registrationBlock")
+      .classList
+      .add("hidden");
+
+    document
+      .getElementById("successBlock")
+      .classList
+      .remove("hidden");
+
+    document.getElementById("createdTeamName").textContent =
+      result.team.name;
+
+    currentPlayLink =
+      `${window.location.origin}/play.html?pin=${result.team.code}`;
+
+    document.getElementById("playLink").value =
+      currentPlayLink;
+  });
+
+document
+  .getElementById("copyLinkBtn")
+  .addEventListener("click", async () => {
+    await navigator.clipboard.writeText(currentPlayLink);
+
+    const message = document.getElementById("copyMessage");
+    message.className = "success-message";
+    message.textContent = "✓ Посилання скопійовано";
+
+    setTimeout(() => {
+      message.textContent = "";
+    }, 3000);
+  });
+
+document
+  .getElementById("openPlayBtn")
+  .addEventListener("click", () => {
+    window.location.href = currentPlayLink;
+  });
+
+loadRun();
+</script>
+
+</body>
+</html>
