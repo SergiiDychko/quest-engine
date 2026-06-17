@@ -287,7 +287,7 @@ function renderSystemPage(pageType) {
       <p class="muted-text">Додайте текст, зображення, відео, аудіо або власний HTML/CSS/JS. Порядок блоків можна змінювати кнопками ↑ та ↓.</p>
       <div id="systemPageBuilder" class="page-builder-root"></div>
 
-      <div class="save-row">
+      <div class="save-row editor-sticky-actions">
         <button id="previewPageBtn" type="button">Попередній перегляд</button>
         <button id="savePageBtn" type="button">Зберегти всі зміни на сторінці</button>
         <span id="savePageMessage"></span>
@@ -353,7 +353,7 @@ function renderRegistrationSettingsPage(page) {
         </div>
       </details>
 
-      <div class="save-row">
+      <div class="save-row editor-sticky-actions">
         <button id="savePageBtn" type="button">Зберегти всі зміни на сторінці</button>
         <span id="savePageMessage"></span>
       </div>
@@ -492,12 +492,25 @@ function renderTaskTab(task) {
         title="Редактор завдання"
       ></iframe>
 
-      <div class="save-row">
+      <div class="save-row editor-sticky-actions">
+        <button id="previewTaskPageBtn" type="button">Попередній перегляд</button>
         <button id="saveTaskPageBtn">Зберегти всі зміни на сторінці</button>
         <span id="saveTaskPageMessage"></span>
       </div>
     </div>
   `;
+
+  document.getElementById("previewTaskPageBtn")?.addEventListener("click", () => {
+    const frame = document.getElementById("taskEditorFrame");
+    const previewFn = frame?.contentWindow?.previewTaskFromParent;
+
+    if (typeof previewFn === "function") {
+      previewFn();
+      return;
+    }
+
+    alert("Попередній перегляд ще не готовий. Спробуйте після завантаження редактора.");
+  });
 
   document.getElementById("saveTaskPageBtn").addEventListener("click", () => {
     saveTaskPageChanges();

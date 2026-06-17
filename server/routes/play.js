@@ -221,6 +221,57 @@ async function checkOlympiadCompletion(teamId, task) {
   };
 }
 
+
+async function getMultitaskPayload(teamId, taskId) {
+  const settings = await dbGet(
+    `SELECT * FROM multitask_settings WHERE task_id = ?`,
+    [taskId]
+  );
+
+  if (!settings) {
+    return null;
+  }
+
+  const subtasks = await dbAll(
+    `
+    SELECT
+      multitask_subtasks.*,
+      team_found_answers.found_at,
+      team_multitask_hint_purchases.purchased_at
+    FROM multitask_subtasks
+    LEFT JOIN team_found_answers
+      ON team_found_answers.task_answer_id = multitask_subtasks.task_answer_id
+      AND team_found_answers.team_id = ?
+    LEFT JOIN team_multitask_hint_purchases
+      ON team_multitask_hint_purchases.multitask_subtask_id = multitask_subtasks.id
+      AND team_multitask_hint_purchases.team_id = ?
+    WHERE multitask_subtasks.task_id = ?
+    ORDER BY multitask_subtasks.sort_order ASC, multitask_subtasks.id ASC
+    `,
+    [teamId, teamId, taskId]
+  );
+
+  return {
+    settings,
+    subtasks: subtasks.map(item => ({
+      id: item.id,
+      sort_order: item.sort_order,
+      content: item.content || "",
+      answer_text: item.found_at ? item.answer_text : "",
+      description: item.description || "",
+      comment: item.found_at ? (item.comment || "") : "",
+      hint_type: item.hint_type || "NONE",
+      hint_text: item.hint_text || "",
+      hint_after_seconds: Number(item.hint_after_seconds) || 0,
+      hint_purchase_after_seconds: Number(item.hint_purchase_after_seconds) || 0,
+      hint_purchase_value: Number(item.hint_purchase_value) || 0,
+      is_found: Boolean(item.found_at),
+      hint_purchased: Boolean(item.purchased_at),
+      task_answer_id: item.task_answer_id
+    }))
+  };
+}
+
 function defaultGamePage(pageType) {
   if (pageType === "START") {
     return {
@@ -732,22 +783,24 @@ router.get("/:pin", (req, res) => {
                 }
 
                 Promise.resolve(
-                  task.task_type === "OLYMPIAD"
-                    ? getOlympiadPayload(gameData.team_id, task.id)
-                    : null
-                ).then(olympiad => {
+                  Promise.all([
+                    task.task_type === "OLYMPIAD" ? getOlympiadPayload(gameData.team_id, task.id) : Promise.resolve(null),
+                    task.task_type === "MULTITASK" ? getMultitaskPayload(gameData.team_id, task.id) : Promise.resolve(null)
+                  ])
+                ).then(([olympiad, multitask]) => {
                   res.json({
                     status: "READY",
                     game: gameData,
                     task,
-                    content,
-                    hints,
+                    content: task.task_type === "MULTITASK" ? [] : content,
+                    hints: task.task_type === "MULTITASK" ? [] : hints,
                     answers: task.hide_answers_block ? [] : answers,
                     found_answers: foundAnswers,
-                    olympiad
+                    olympiad,
+                    multitask
                   });
                 }).catch(() => {
-                  res.status(500).json({ error: "Помилка завантаження олімпійки" });
+                  res.status(500).json({ error: "Помилка завантаження завдання" });
                 });
               }
             );
@@ -1160,6 +1213,10 @@ router.post("/:pin/answer", async (req, res) => {
       ? await getOlympiadPayload(gameData.team_id, task.id)
       : null;
 
+    const multitask = task.task_type === "MULTITASK"
+      ? await getMultitaskPayload(gameData.team_id, task.id)
+      : null;
+
     return res.json({
       accepted: acceptedCount > 0 || repeatedCount > 0,
       repeated: acceptedCount === 0 && repeatedCount > 0,
@@ -1170,6 +1227,7 @@ router.post("/:pin/answer", async (req, res) => {
       found_items: newlyFound,
       found: newlyFound[0] || null,
       olympiad,
+      multitask,
       found_main: completeResult.found_main,
       required_main_answers: completeResult.required_main_answers
     });
@@ -1181,6 +1239,81 @@ router.post("/:pin/answer", async (req, res) => {
   }
 });
 
+
+
+router.post("/:pin/multitask/subtask/:subtaskId/hint/purchase", async (req, res) => {
+  const pin = String(req.params.pin || "").trim().toUpperCase();
+  const subtaskId = Number(req.params.subtaskId);
+
+  if (!Number.isInteger(subtaskId) || subtaskId < 1) {
+    return res.status(400).json({ error: "Невірний номер підзавдання" });
+  }
+
+  try {
+    const gameData = await new Promise((resolve, reject) => {
+      getGameDataByPin(pin, (error, data) => error ? reject(error) : resolve(data));
+    });
+
+    if (!gameData) return res.status(404).json({ error: "Команду не знайдено" });
+    if (gameData.run_status === "ARCHIVED") return res.status(403).json({ error: "Цей запуск уже в архіві" });
+
+    const task = await new Promise((resolve, reject) => {
+      getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => error ? reject(error) : resolve(currentTask));
+    });
+
+    if (!task) return res.status(404).json({ error: "Команда вже завершила гру" });
+    if (task.task_type !== "MULTITASK") return res.status(400).json({ error: "Поточне завдання не є Multitask" });
+
+    const subtask = await dbGet(
+      `SELECT * FROM multitask_subtasks WHERE id = ? AND task_id = ?`,
+      [subtaskId, task.id]
+    );
+
+    if (!subtask) return res.status(404).json({ error: "Підзавдання не знайдено" });
+    if (subtask.hint_type !== "PAID") return res.status(400).json({ error: "Для цього підзавдання платна підказка не передбачена" });
+
+    const elapsedSeconds = (() => {
+      if (!task.opened_at) return 0;
+      const openedDate = parseUtcDate(task.opened_at);
+      if (!openedDate || Number.isNaN(openedDate.getTime())) return 0;
+      return Math.floor((Date.now() - openedDate.getTime()) / 1000);
+    })();
+
+    if (elapsedSeconds < (Number(subtask.hint_purchase_after_seconds) || 0)) {
+      return res.status(403).json({ error: "Купівля підказки ще недоступна" });
+    }
+
+    const existing = await dbGet(
+      `SELECT id FROM team_multitask_hint_purchases WHERE team_id = ? AND multitask_subtask_id = ?`,
+      [gameData.team_id, subtask.id]
+    );
+
+    if (!existing) {
+      await dbRun(
+        `INSERT INTO team_multitask_hint_purchases (team_id, multitask_subtask_id) VALUES (?, ?)`,
+        [gameData.team_id, subtask.id]
+      );
+
+      const purchaseValue = Math.max(0, Number(subtask.hint_purchase_value || 0));
+      if (purchaseValue > 0) {
+        await dbRun(
+          `UPDATE team_tasks SET penalty_seconds = penalty_seconds + ? WHERE team_id = ? AND task_id = ?`,
+          [purchaseValue, gameData.team_id, task.id]
+        );
+
+        await dbRun(
+          `INSERT INTO team_time_adjustments (team_id, task_id, adjustment_type, seconds, comment) VALUES (?, ?, 'MANUAL_PENALTY', ?, ?)`,
+          [gameData.team_id, task.id, purchaseValue, `Купівля підказки Multitask №${subtask.sort_order}`]
+        );
+      }
+    }
+
+    const multitask = await getMultitaskPayload(gameData.team_id, task.id);
+    res.json({ message: "Підказку куплено", multitask });
+  } catch (error) {
+    res.status(500).json({ error: "Помилка купівлі підказки" });
+  }
+});
 
 router.post("/:pin/olympiad/cell/:cellNumber/purchase", async (req, res) => {
   const pin = String(req.params.pin || "").trim().toUpperCase();
@@ -1301,6 +1434,7 @@ router.post("/:pin/olympiad/cell/:cellNumber/purchase", async (req, res) => {
       task_completed: completeResult.completed,
       has_next_task: nextExists,
       olympiad,
+      multitask,
       found_main: completeResult.found_main,
       required_main_answers: completeResult.required_main_answers
     });

@@ -49,6 +49,10 @@
       <option value="OLYMPIAD">
         OLYMPIAD — олімпійка
       </option>
+
+      <option value="MULTITASK">
+        MULTITASK — кілька підзавдань
+      </option>
     </select>
 
   </div>
@@ -71,6 +75,7 @@
       <button class="tab-btn" data-tab="codesTab">Коди</button>
       <button class="tab-btn" data-tab="hintsTab">Підказки</button>
       <button class="tab-btn" data-tab="autoTab">Автоперехід</button>
+      <button class="tab-btn hidden" data-tab="multitaskTab">Multitask</button>
     </div>
 
     <section id="contentTab" class="tab-panel">
@@ -107,6 +112,12 @@
       <h2>Підказки</h2>
       <div id="hintsList">Завантаження...</div>
       <button onclick="addHint()">Додати підказку</button>
+    </section>
+
+    <section id="multitaskTab" class="tab-panel hidden">
+      <h2>Multitask</h2>
+      <p class="muted-text">Створіть кілька підзавдань. Кожне підзавдання має власний контент, один код-відповідь і власну підказку.</p>
+      <div id="multitaskEditor">Завантаження...</div>
     </section>
 
     <section id="autoTab" class="tab-panel hidden">
@@ -147,6 +158,9 @@ let currentTask = null;
 let currentAnswers = [];
 let currentHints = [];
 let currentOlympiad = null;
+let currentMultitask = null;
+let multitaskContentEditor = null;
+let multitaskEditingSubtaskId = null;
 
 document.querySelectorAll(".tab-btn").forEach(button => {
   button.addEventListener("click", () => {
@@ -171,18 +185,26 @@ function activateTab(tabId) {
 function updateTaskEditorMode() {
   const type = document.getElementById("taskTypeSelect").value;
   const isOlympiad = type === "OLYMPIAD";
+  const isMultitask = type === "MULTITASK";
 
   const contentButton = document.querySelector('[data-tab="contentTab"]');
   const codesButton = document.querySelector('[data-tab="codesTab"]');
   const hintsButton = document.querySelector('[data-tab="hintsTab"]');
+  const multitaskButton = document.querySelector('[data-tab="multitaskTab"]');
 
-  if (contentButton) contentButton.classList.toggle("hidden", isOlympiad);
-  if (hintsButton) hintsButton.classList.toggle("hidden", isOlympiad);
-  if (codesButton) codesButton.textContent = isOlympiad ? "Олімпійка" : "Коди";
+  if (contentButton) contentButton.classList.toggle("hidden", isOlympiad || isMultitask);
+  if (hintsButton) hintsButton.classList.toggle("hidden", isOlympiad || isMultitask);
+  if (codesButton) {
+    codesButton.classList.toggle("hidden", isMultitask);
+    codesButton.textContent = isOlympiad ? "Олімпійка" : "Коди";
+  }
+  if (multitaskButton) multitaskButton.classList.toggle("hidden", !isMultitask);
 
   if (isOlympiad) {
     activateTab("codesTab");
-  } else if (document.querySelector('[data-tab="contentTab"]').classList.contains("hidden")) {
+  } else if (isMultitask) {
+    activateTab("multitaskTab");
+  } else if (contentButton && contentButton.classList.contains("hidden")) {
     activateTab("codesTab");
   }
 }
@@ -212,6 +234,7 @@ document.getElementById("taskTypeSelect").value =
   updateTaskEditorMode();
 
   await loadOlympiadIfNeeded();
+  await loadMultitaskIfNeeded();
   renderCodes(currentAnswers);
   renderAutoTransition();
 }
@@ -275,7 +298,7 @@ document
           task_type:
             document.getElementById("taskTypeSelect").value,
           hide_answers_block:
-            document.getElementById("taskTypeSelect").value === "OLYMPIAD"
+            ["OLYMPIAD", "MULTITASK"].includes(document.getElementById("taskTypeSelect").value)
         })
       });
 
@@ -383,6 +406,84 @@ document.getElementById("previewTaskContentBtn").addEventListener("click", () =>
 
   contentBuilder.openPreview(title);
 });
+
+function openTaskPreviewDocument(title, bodyHtml) {
+  const preview = window.open("", "_blank");
+  if (!preview) {
+    alert("Браузер заблокував відкриття попереднього перегляду");
+    return;
+  }
+
+  preview.document.open();
+  preview.document.write(`<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(title)}</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="content-renderer.js"><\/script>
+</head>
+<body>
+  <main class="app">
+    <div class="card">
+      <h1>${escapeHtml(title)}</h1>
+      ${bodyHtml}
+    </div>
+  </main>
+  <script>
+    window.addEventListener("load", function () {
+      if (window.QEContentRenderer && QEContentRenderer.resizeHtmlFrames) {
+        QEContentRenderer.resizeHtmlFrames(document);
+      }
+    });
+  <\/script>
+</body>
+</html>`);
+  preview.document.close();
+}
+
+window.previewTaskFromParent = function () {
+  const title = currentTask
+    ? (String(currentTask.title || "").trim() ? `Завдання ${currentTask.sort_order}. ${currentTask.title}` : `Завдання ${currentTask.sort_order}.`)
+    : "Попередній перегляд завдання";
+
+  if (currentTask && currentTask.task_type === "MULTITASK") {
+    collectMultitaskEditorState();
+    const subtasks = currentMultitask?.subtasks || [];
+    const html = subtasks.length
+      ? `<div class="multitask-player-list">${subtasks.map((subtask, index) => `
+          <div class="multitask-subtask-player">
+            <div class="multitask-subtask-number">${index + 1}</div>
+            <div class="multitask-subtask-content">${renderMultitaskPreview(subtask.content || "")}</div>
+            ${subtask.description ? `<div class="multitask-answer-format">Формат відповіді: ${escapeHtml(subtask.description)}</div>` : ""}
+          </div>
+        `).join("")}</div>`
+      : `<p class="muted-text">Підзавдань ще немає.</p>`;
+    openTaskPreviewDocument(title, html);
+    return;
+  }
+
+  if (currentTask && currentTask.task_type === "OLYMPIAD") {
+    const payload = collectOlympiadPayload();
+    const html = `
+      <h2>Олімпійка</h2>
+      <div class="olympiad-player-grid olympiad-preview-grid">
+        ${payload.cells.map(cell => `
+          <div class="olympiad-cell-preview-card">
+            <strong>${cell.cell_number}</strong>
+            <div>${cell.content ? renderOlympiadCellPreview(cell.content) : "—"}</div>
+          </div>
+        `).join("")}
+      </div>`;
+    openTaskPreviewDocument(title, html);
+    return;
+  }
+
+  if (contentBuilder) {
+    contentBuilder.openPreview(title);
+  }
+};
 
 async function loadHints() {
   const response = await fetch(`/api/task-hints/${taskId}`);
@@ -818,6 +919,418 @@ function collectOlympiadPayload() {
 }
 
 
+async function loadMultitaskIfNeeded() {
+  const root = document.getElementById("multitaskEditor");
+
+  if (!currentTask || currentTask.task_type !== "MULTITASK") {
+    currentMultitask = null;
+    if (root) root.innerHTML = "";
+    return;
+  }
+
+  const response = await fetch(`/api/tasks/${taskId}/multitask`);
+  const result = await response.json();
+
+  if (!response.ok) {
+    root.textContent = result.error || "Помилка завантаження multitask";
+    return;
+  }
+
+  currentMultitask = {
+    settings: result.settings || { completion_type: "ALL", required_count: null },
+    subtasks: result.subtasks || []
+  };
+
+  renderMultitaskEditor();
+}
+
+function parseMultitaskContent(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [{
+      type: "SECTION",
+      content: JSON.stringify({
+        columns: [
+          {
+            width: 100,
+            blocks: [
+              {
+                type: "TEXT",
+                content: JSON.stringify({
+                  text: String(value || ""),
+                  html: `<p>${escapeHtml(String(value || ""))}</p>`,
+                  format: "tiptap"
+                })
+              }
+            ]
+          }
+        ]
+      })
+    }];
+  }
+}
+
+function stringifyMultitaskContent(blocks) {
+  return JSON.stringify(blocks || []);
+}
+
+function renderMultitaskPreview(content) {
+  const blocks = parseMultitaskContent(content);
+  if (!blocks.length) return `<span class="muted-text">Вміст не задано</span>`;
+  return QEContentRenderer.renderBlocks(blocks);
+}
+
+function makeMultitaskSubtask() {
+  const nextOrder = (currentMultitask?.subtasks || []).length + 1;
+  return {
+    id: `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    isNew: true,
+    sort_order: nextOrder,
+    content: "",
+    answer_text: "",
+    description: "",
+    comment: "",
+    hint_type: "NONE",
+    hint_text: "",
+    hint_after_seconds: 0,
+    hint_purchase_after_seconds: 0,
+    hint_purchase_value: 0
+  };
+}
+
+function renderMultitaskEditor() {
+  const root = document.getElementById("multitaskEditor");
+  if (!root) return;
+
+  const settings = currentMultitask?.settings || { completion_type: "ALL", required_count: null };
+  const subtasks = currentMultitask?.subtasks || [];
+  const completionType = settings.completion_type || "ALL";
+
+  root.innerHTML = `
+    <div class="multitask-settings-block ${subtasks.length ? "" : "hidden"}">
+      <h3>Умова проходження</h3>
+      <div class="multitask-setting-row">
+        <label>
+          <span>Умова проходження</span>
+          <select id="multitaskCompletionType">
+            <option value="ALL" ${completionType === "ALL" ? "selected" : ""}>Потрібно здати всі коди</option>
+            <option value="COUNT" ${completionType === "COUNT" ? "selected" : ""}>Потрібно здати N кодів</option>
+          </select>
+        </label>
+        <label id="multitaskRequiredCountLabel">
+          <span>N</span>
+          <input id="multitaskRequiredCount" type="number" min="1" max="${Math.max(1, subtasks.length)}" value="${settings.required_count || subtasks.length || 1}">
+        </label>
+      </div>
+    </div>
+
+    <div class="multitask-subtasks-list">
+      ${subtasks.length ? subtasks.map((subtask, index) => renderMultitaskSubtaskEditor(subtask, index)).join("") : `
+        <div class="builder-empty">Тут ще немає жодного підзавдання.</div>
+      `}
+    </div>
+
+    <div class="multitask-add-row">
+      <button id="addMultitaskSubtaskBtn" type="button">Створити підзавдання</button>
+      <span id="saveMultitaskMessage"></span>
+    </div>
+
+    <div id="multitaskContentModal" class="modal-backdrop hidden">
+      <div class="modal-card multitask-content-modal-card">
+        <div class="modal-header">
+          <h3 id="multitaskContentModalTitle">Вміст підзавдання</h3>
+          <button type="button" class="small-light-btn" id="closeMultitaskContentModalBtn">×</button>
+        </div>
+        <div id="multitaskContentBuilder" class="multitask-content-builder"></div>
+        <div class="save-row">
+          <button type="button" id="applyMultitaskContentBtn">Застосувати вміст</button>
+          <span id="multitaskContentMessage"></span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const completionSelect = document.getElementById("multitaskCompletionType");
+  if (completionSelect) completionSelect.addEventListener("change", updateMultitaskRequiredFieldState);
+
+  document.getElementById("addMultitaskSubtaskBtn")?.addEventListener("click", () => {
+    currentMultitask.subtasks.push(makeMultitaskSubtask());
+    renderMultitaskEditor();
+  });
+
+  document.getElementById("closeMultitaskContentModalBtn")?.addEventListener("click", closeMultitaskContentModal);
+  document.getElementById("applyMultitaskContentBtn")?.addEventListener("click", applyMultitaskContent);
+
+  root.querySelectorAll('[data-action="edit-multitask-content"]').forEach(button => {
+    button.addEventListener("click", () => openMultitaskContentModal(button.dataset.subtaskId));
+  });
+
+  root.querySelectorAll('[data-action="delete-multitask-subtask"]').forEach(button => {
+    button.addEventListener("click", () => deleteMultitaskSubtask(button.dataset.subtaskId));
+  });
+
+  root.querySelectorAll('[data-action="move-multitask-subtask"]').forEach(button => {
+    button.addEventListener("click", () => moveMultitaskSubtask(button.dataset.subtaskId, Number(button.dataset.direction)));
+  });
+
+  root.querySelectorAll('[data-hint-type-select]').forEach(select => {
+    select.addEventListener("change", () => updateMultitaskHintFields(select.closest("[data-multitask-subtask]")));
+    updateMultitaskHintFields(select.closest("[data-multitask-subtask]"));
+  });
+
+  root.querySelectorAll("input, textarea, select").forEach(input => {
+    input.addEventListener("input", collectMultitaskEditorState);
+    input.addEventListener("change", collectMultitaskEditorState);
+  });
+
+  updateMultitaskRequiredFieldState();
+  QEContentRenderer.resizeHtmlFrames(root);
+}
+
+function renderMultitaskSubtaskEditor(subtask, index) {
+  const id = escapeHtml(subtask.id);
+  const hintType = subtask.hint_type || "NONE";
+
+  return `
+    <div class="multitask-subtask-card" data-multitask-subtask="${id}" data-subtask-content="${escapeHtml(subtask.content || "")}">
+      <div class="builder-block-header">
+        <strong>${index + 1}. Підзавдання</strong>
+        <div class="builder-block-actions">
+          <button type="button" data-action="move-multitask-subtask" data-subtask-id="${id}" data-direction="-1" ${index === 0 ? "disabled" : ""}>↑</button>
+          <button type="button" data-action="move-multitask-subtask" data-subtask-id="${id}" data-direction="1" ${index === (currentMultitask.subtasks.length - 1) ? "disabled" : ""}>↓</button>
+          <button type="button" data-action="delete-multitask-subtask" data-subtask-id="${id}" class="danger-btn">Видалити</button>
+        </div>
+      </div>
+
+      <div class="multitask-subtask-body">
+        <h4>Контент</h4>
+        <div class="multitask-subtask-preview" data-multitask-preview="${id}">
+          ${renderMultitaskPreview(subtask.content || "")}
+        </div>
+        <button type="button" class="olympiad-edit-content-btn" data-action="edit-multitask-content" data-subtask-id="${id}">Редагувати вміст</button>
+
+        <h4>Код-відповідь</h4>
+        <div class="multitask-code-grid">
+          <label>
+            <span>Значення</span>
+            <input data-field="answer_text" value="${escapeHtml(subtask.answer_text || "")}">
+          </label>
+          <label>
+            <span>Опис</span>
+            <input data-field="description" value="${escapeHtml(subtask.description || "")}" placeholder="Наприклад: 1 слово">
+          </label>
+          <label>
+            <span>Коментар</span>
+            <input data-field="comment" value="${escapeHtml(subtask.comment || "")}" placeholder="Необовʼязково">
+          </label>
+        </div>
+
+        <h4>Підказка</h4>
+        <label class="multitask-hint-type-row">
+          <span>Тип підказки</span>
+          <select data-field="hint_type" data-hint-type-select>
+            <option value="NONE" ${hintType === "NONE" ? "selected" : ""}>Без підказки</option>
+            <option value="TIMED" ${hintType === "TIMED" ? "selected" : ""}>Підказка за часом</option>
+            <option value="PAID" ${hintType === "PAID" ? "selected" : ""}>Платна підказка</option>
+          </select>
+        </label>
+
+        <div class="multitask-hint-fields" data-hint-fields>
+          <label>
+            <span>Текст підказки</span>
+            <textarea data-field="hint_text" rows="3">${escapeHtml(subtask.hint_text || "")}</textarea>
+          </label>
+          <label data-hint-timed-field>
+            <span>Показати через, сек</span>
+            <input data-field="hint_after_seconds" type="number" min="0" value="${Number(subtask.hint_after_seconds) || 0}">
+          </label>
+          <label data-hint-paid-field>
+            <span>Кнопка купівлі через, сек</span>
+            <input data-field="hint_purchase_after_seconds" type="number" min="0" value="${Number(subtask.hint_purchase_after_seconds) || 0}">
+          </label>
+          <label data-hint-paid-field>
+            <span>Купити за, сек</span>
+            <input data-field="hint_purchase_value" type="number" min="0" value="${Number(subtask.hint_purchase_value) || 0}">
+          </label>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function updateMultitaskRequiredFieldState() {
+  const select = document.getElementById("multitaskCompletionType");
+  const label = document.getElementById("multitaskRequiredCountLabel");
+  if (!select || !label) return;
+  label.classList.toggle("hidden", select.value !== "COUNT");
+}
+
+function updateMultitaskHintFields(card) {
+  if (!card) return;
+  const type = card.querySelector('[data-field="hint_type"]')?.value || "NONE";
+  const fields = card.querySelector('[data-hint-fields]');
+  if (fields) fields.classList.toggle("hidden", type === "NONE");
+  card.querySelectorAll('[data-hint-timed-field]').forEach(item => item.classList.toggle("hidden", type !== "TIMED"));
+  card.querySelectorAll('[data-hint-paid-field]').forEach(item => item.classList.toggle("hidden", type !== "PAID"));
+}
+
+function collectMultitaskEditorState() {
+  if (!currentMultitask) return;
+
+  const cards = Array.from(document.querySelectorAll('[data-multitask-subtask]'));
+  currentMultitask.subtasks = cards.map((card, index) => ({
+    id: card.dataset.multitaskSubtask,
+    isNew: String(card.dataset.multitaskSubtask || "").startsWith("tmp-"),
+    sort_order: index + 1,
+    content: card.dataset.subtaskContent || "",
+    answer_text: card.querySelector('[data-field="answer_text"]')?.value || "",
+    description: card.querySelector('[data-field="description"]')?.value || "",
+    comment: card.querySelector('[data-field="comment"]')?.value || "",
+    hint_type: card.querySelector('[data-field="hint_type"]')?.value || "NONE",
+    hint_text: card.querySelector('[data-field="hint_text"]')?.value || "",
+    hint_after_seconds: Number(card.querySelector('[data-field="hint_after_seconds"]')?.value) || 0,
+    hint_purchase_after_seconds: Number(card.querySelector('[data-field="hint_purchase_after_seconds"]')?.value) || 0,
+    hint_purchase_value: Number(card.querySelector('[data-field="hint_purchase_value"]')?.value) || 0
+  }));
+
+  currentMultitask.settings = {
+    completion_type: document.getElementById("multitaskCompletionType")?.value || "ALL",
+    required_count: Number(document.getElementById("multitaskRequiredCount")?.value) || null
+  };
+}
+
+function openMultitaskContentModal(subtaskId) {
+  collectMultitaskEditorState();
+  multitaskEditingSubtaskId = subtaskId;
+  const subtask = (currentMultitask?.subtasks || []).find(item => String(item.id) === String(subtaskId));
+  if (!subtask) return;
+
+  const modal = document.getElementById("multitaskContentModal");
+  const root = document.getElementById("multitaskContentBuilder");
+  document.getElementById("multitaskContentModalTitle").textContent = `Вміст підзавдання №${subtask.sort_order}`;
+  modal.classList.remove("hidden");
+
+  multitaskContentEditor = new QEContentBuilder({
+    root,
+    blocks: parseMultitaskContent(subtask.content),
+    previewTitle: `Підзавдання №${subtask.sort_order}`
+  });
+}
+
+function closeMultitaskContentModal() {
+  document.getElementById("multitaskContentModal")?.classList.add("hidden");
+  multitaskEditingSubtaskId = null;
+  multitaskContentEditor = null;
+}
+
+function applyMultitaskContent() {
+  if (!multitaskContentEditor || !multitaskEditingSubtaskId) return;
+
+  let blocks;
+  try {
+    blocks = multitaskContentEditor.getBlocks();
+  } catch (error) {
+    document.getElementById("multitaskContentMessage").textContent = error.message || "Помилка перевірки вмісту";
+    return;
+  }
+
+  const serialized = stringifyMultitaskContent(blocks);
+  const card = document.querySelector(`[data-multitask-subtask="${CSS.escape(String(multitaskEditingSubtaskId))}"]`);
+  if (card) {
+    card.dataset.subtaskContent = serialized;
+    const preview = card.querySelector('[data-multitask-preview]');
+    if (preview) {
+      preview.innerHTML = renderMultitaskPreview(serialized);
+      QEContentRenderer.resizeHtmlFrames(preview);
+    }
+  }
+
+  collectMultitaskEditorState();
+  closeMultitaskContentModal();
+}
+
+function deleteMultitaskSubtask(subtaskId) {
+  if (!confirm("Видалити це підзавдання?")) return;
+  collectMultitaskEditorState();
+  currentMultitask.subtasks = currentMultitask.subtasks.filter(item => String(item.id) !== String(subtaskId));
+  currentMultitask.subtasks.forEach((item, index) => { item.sort_order = index + 1; });
+  renderMultitaskEditor();
+}
+
+function moveMultitaskSubtask(subtaskId, direction) {
+  collectMultitaskEditorState();
+  const index = currentMultitask.subtasks.findIndex(item => String(item.id) === String(subtaskId));
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= currentMultitask.subtasks.length) return;
+  const [item] = currentMultitask.subtasks.splice(index, 1);
+  currentMultitask.subtasks.splice(target, 0, item);
+  currentMultitask.subtasks.forEach((subtask, i) => { subtask.sort_order = i + 1; });
+  renderMultitaskEditor();
+}
+
+function collectMultitaskCodesForDuplicateValidation() {
+  collectMultitaskEditorState();
+  return (currentMultitask?.subtasks || []).map((subtask, index) => ({
+    label: `Підзавдання №${index + 1}`,
+    value: subtask.answer_text
+  }));
+}
+
+async function saveMultitask(options = {}) {
+  if (!currentTask || currentTask.task_type !== "MULTITASK") {
+    return { ok: true };
+  }
+
+  collectMultitaskEditorState();
+  const subtasks = currentMultitask?.subtasks || [];
+  const message = document.getElementById("saveMultitaskMessage");
+
+  const duplicateValidation = validateNoDuplicateCodes(collectMultitaskCodesForDuplicateValidation());
+  if (!duplicateValidation.ok) return duplicateValidation;
+
+  const completionType = currentMultitask.settings.completion_type || "ALL";
+  const requiredCount = completionType === "COUNT"
+    ? Number(currentMultitask.settings.required_count) || 1
+    : subtasks.length;
+
+  if (completionType === "COUNT" && (requiredCount < 1 || requiredCount > subtasks.length)) {
+    const error = "Кількість кодів для проходження має бути від 1 до кількості підзавдань.";
+    alert(error);
+    return { ok: false, error };
+  }
+
+  const response = await fetch(`/api/tasks/${taskId}/multitask`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      completion_type: completionType,
+      required_count: requiredCount,
+      subtasks
+    })
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    const error = result.error || "Помилка збереження Multitask";
+    if (!options.silent) alert(error);
+    return { ok: false, error };
+  }
+
+  if (message && !options.silent) {
+    message.className = "success-message";
+    message.textContent = "✓ Multitask збережено";
+    setTimeout(() => { message.textContent = ""; }, 3000);
+  }
+
+  await loadMultitaskIfNeeded();
+  return { ok: true };
+}
+
+
 function normalizeCodeForDuplicateCheck(value) {
   return String(value || "")
     .trim()
@@ -847,7 +1360,8 @@ function findDuplicateCodes(items) {
 }
 
 function formatDuplicateCodeMessage(duplicate) {
-  return `Код ${duplicate.first} і код ${duplicate.second} однакові. Потрібно виправити.`;
+  const valueLine = duplicate.value ? `Виявлено дубль коду "${duplicate.value}".\n\n` : "";
+  return `${valueLine}${duplicate.first}\n${duplicate.second}\n\nПотрібно виправити.`;
 }
 
 function validateNoDuplicateCodes(items) {
@@ -957,6 +1471,13 @@ function renderCodes(answers) {
   if (saveBtn) saveBtn.addEventListener("click", saveAllCodes);
 }
 
+function codeTypeLabel(type) {
+  if (type === "MAIN") return "Основний код";
+  if (type === "BONUS") return "Бонусний код";
+  if (type === "PENALTY") return "Штрафний код";
+  return "Код";
+}
+
 function renderCodeTable(title, answers, showSeconds) {
   if (!answers.length) return "";
 
@@ -1030,7 +1551,7 @@ async function saveAllCodes() {
 
   const duplicateValidation = validateNoDuplicateCodes(
     answers.map(answer => ({
-      label: String(answer.sort_order),
+      label: `${codeTypeLabel(answer.answer_type)} №${answer.sort_order}`,
       value: answer.answer_text
     }))
   );
@@ -1147,6 +1668,10 @@ async function saveAllContentItemsSilently_DISABLED() {
 }
 
 async function saveAllHintsSilently() {
+  if (currentTask && currentTask.task_type === "MULTITASK") {
+    return { ok: true };
+  }
+
   for (const hint of currentHints) {
     const secondsInput = document.getElementById(`hint-seconds-${hint.id}`);
     const contentInput = document.getElementById(`hint-content-${hint.id}`);
@@ -1178,6 +1703,10 @@ async function saveAllCodesSilently() {
     return saveOlympiad({ silent: true });
   }
 
+  if (currentTask && currentTask.task_type === "MULTITASK") {
+    return { ok: true };
+  }
+
   if (!currentAnswers.length) {
     return { ok: true };
   }
@@ -1206,7 +1735,7 @@ async function saveAllCodesSilently() {
 
   const duplicateValidation = validateNoDuplicateCodes(
     answers.map(answer => ({
-      label: String(answer.sort_order),
+      label: `${codeTypeLabel(answer.answer_type)} №${answer.sort_order}`,
       value: answer.answer_text
     }))
   );
@@ -1264,6 +1793,7 @@ window.saveTaskChangesFromParent = async function () {
     () => saveTaskHeader({ silent: true, skipReload: true }),
     saveContentBlocksSilently,
     saveAllCodesSilently,
+    saveMultitask,
     saveAllHintsSilently,
     saveAutoTransitionSilently
   ];

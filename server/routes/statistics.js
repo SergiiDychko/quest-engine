@@ -454,15 +454,6 @@ async function completeTeamToFinish({
   completedAt,
   commentPrefix
 }) {
-  if (team.finished_at) {
-    return {
-      team_id: team.id,
-      team_name: team.name,
-      status: "skipped",
-      reason: "Команда вже фінішувала"
-    };
-  }
-
   const activeTeamTask = await dbGet(
     `
     SELECT
@@ -479,6 +470,15 @@ async function completeTeamToFinish({
     `,
     [team.id]
   );
+
+  if (team.finished_at && !activeTeamTask) {
+    return {
+      team_id: team.id,
+      team_name: team.name,
+      status: "skipped",
+      reason: "Команда вже фінішувала"
+    };
+  }
 
   let currentSortOrder = 0;
   let completedCurrent = false;
@@ -523,7 +523,6 @@ async function completeTeamToFinish({
     UPDATE teams
     SET finished_at = ?
     WHERE id = ?
-      AND finished_at IS NULL
     `,
     [completedAt, team.id]
   );
@@ -1250,7 +1249,7 @@ router.post(
             continue;
           }
 
-          if (team.finished_at) {
+          if (team.finished_at && !finishGame) {
             results.push({
               team_id: teamId,
               team_name: team.name,

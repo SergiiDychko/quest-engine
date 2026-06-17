@@ -2044,3 +2044,160 @@ th.selected-stat-column-cell {
     gap: 4px;
   }
 }
+
+/* MULTITASK */
+.multitask-settings-block,
+.multitask-subtask-card {
+  border: 1px solid #cbd5e1;
+  border-left: 5px solid #2563eb;
+  padding: 16px;
+  margin: 16px 0;
+  background: #fff;
+}
+
+.multitask-setting-row {
+  display: flex;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.multitask-setting-row label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.multitask-setting-row select,
+.multitask-setting-row input {
+  min-width: 180px;
+}
+
+.multitask-subtask-body h4 {
+  margin: 18px 0 8px;
+}
+
+.multitask-subtask-preview {
+  border: 1px dashed #94a3b8;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: #f8fafc;
+}
+
+.multitask-code-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.multitask-code-grid label,
+.multitask-hint-type-row,
+.multitask-hint-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.multitask-hint-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.multitask-hint-fields label:first-child {
+  grid-column: 1 / -1;
+}
+
+.multitask-add-row {
+  margin: 18px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.multitask-content-modal-card {
+  width: min(1100px, 94vw);
+  max-height: 92vh;
+  overflow: auto;
+}
+
+.multitask-player-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 18px 0;
+}
+
+.multitask-subtask-player {
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 16px;
+  background: #fff;
+}
+
+.multitask-subtask-player.done {
+  color: #047857;
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  font-size: 1.2em;
+}
+
+.multitask-subtask-number {
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: #475569;
+}
+
+.multitask-answer-format,
+.multitask-hint-wait,
+.multitask-hint-text {
+  margin-top: 10px;
+  color: #475569;
+}
+
+.multitask-buy-hint-btn {
+  margin-top: 10px;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  background: #fff7ed;
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.multitask-found-comment {
+  margin-left: 8px;
+  color: #065f46;
+}
+
+@media (max-width: 800px) {
+  .multitask-code-grid,
+  .multitask-hint-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Editor sticky action bar */
+.editor-sticky-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 50;
+  padding: 10px 12px;
+  margin-top: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid #cbd5e1;
+  box-shadow: 0 -4px 14px rgba(15, 23, 42, 0.08);
+}
+
+/* Multitask visibility fixes */
+.multitask-setting-row label.hidden,
+.multitask-hint-fields.hidden,
+.multitask-hint-fields label.hidden {
+  display: none !important;
+}
+
+.multitask-settings-block .multitask-setting-row {
+  align-items: center;
+}

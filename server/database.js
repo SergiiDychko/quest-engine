@@ -175,6 +175,49 @@ db.run(`
     )
   `);
 
+
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS multitask_settings (
+      task_id INTEGER PRIMARY KEY,
+      completion_type TEXT NOT NULL DEFAULT 'ALL',
+      required_count INTEGER,
+      FOREIGN KEY (task_id) REFERENCES tasks(id)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS multitask_subtasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      sort_order INTEGER NOT NULL,
+      content TEXT,
+      answer_text TEXT NOT NULL DEFAULT '',
+      description TEXT,
+      comment TEXT,
+      hint_type TEXT NOT NULL DEFAULT 'NONE',
+      hint_text TEXT,
+      hint_after_seconds INTEGER NOT NULL DEFAULT 0,
+      hint_purchase_after_seconds INTEGER NOT NULL DEFAULT 0,
+      hint_purchase_value INTEGER NOT NULL DEFAULT 0,
+      task_answer_id INTEGER,
+      FOREIGN KEY (task_id) REFERENCES tasks(id),
+      FOREIGN KEY (task_answer_id) REFERENCES task_answers(id)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS team_multitask_hint_purchases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      team_id INTEGER NOT NULL,
+      multitask_subtask_id INTEGER NOT NULL,
+      purchased_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(team_id, multitask_subtask_id),
+      FOREIGN KEY (team_id) REFERENCES teams(id),
+      FOREIGN KEY (multitask_subtask_id) REFERENCES multitask_subtasks(id)
+    )
+  `);
+
   db.run(`
     CREATE TABLE IF NOT EXISTS team_tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

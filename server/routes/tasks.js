@@ -56,7 +56,8 @@ function findDuplicateCodes(items) {
     if (seen.has(normalized)) {
       return {
         first: seen.get(normalized).label,
-        second: item.label
+        second: item.label,
+        value: item.value
       };
     }
 
@@ -67,7 +68,15 @@ function findDuplicateCodes(items) {
 }
 
 function formatDuplicateCodeMessage(duplicate) {
-  return `Код ${duplicate.first} і код ${duplicate.second} однакові. Потрібно виправити.`;
+  const valueLine = duplicate.value ? `Виявлено дубль коду "${duplicate.value}".\n\n` : "";
+  return `${valueLine}${duplicate.first}\n${duplicate.second}\n\nПотрібно виправити.`;
+}
+
+function codeTypeLabel(type) {
+  if (type === "MAIN") return "Основний код";
+  if (type === "BONUS") return "Бонусний код";
+  if (type === "PENALTY") return "Штрафний код";
+  return "Код";
 }
 
 function generateOlympiadCellsMeta(associationCount, levelCount) {
@@ -117,7 +126,7 @@ router.put("/:id", requireAuth, (req, res) => {
   const taskId = req.params.id;
   const { title, task_type, hide_answers_block } = req.body;
 
-  if (task_type && !["STANDARD", "OLYMPIAD"].includes(task_type)) {
+  if (task_type && !["STANDARD", "OLYMPIAD", "MULTITASK"].includes(task_type)) {
     return res.status(400).json({
       error: "Невірний тип завдання"
     });
@@ -400,6 +409,9 @@ router.delete("/:id", requireAuth, (req, res) => {
         db.run(`DELETE FROM task_content WHERE task_id = ?`, [taskId]);
         db.run(`DELETE FROM olympiad_cells WHERE task_id = ?`, [taskId]);
         db.run(`DELETE FROM olympiad_settings WHERE task_id = ?`, [taskId]);
+        db.run(`DELETE FROM team_multitask_hint_purchases WHERE multitask_subtask_id IN (SELECT id FROM multitask_subtasks WHERE task_id = ?)`, [taskId]);
+        db.run(`DELETE FROM multitask_subtasks WHERE task_id = ?`, [taskId]);
+        db.run(`DELETE FROM multitask_settings WHERE task_id = ?`, [taskId]);
 
         db.run(
           `DELETE FROM tasks WHERE id = ?`,
@@ -524,7 +536,7 @@ router.put("/:id/answers", requireAuth, (req, res) => {
 
   const duplicate = findDuplicateCodes(
     answers.map(answer => ({
-      label: String(answer.sort_order || ""),
+      label: `${codeTypeLabel(answer.answer_type)} №${answer.sort_order || ""}`,
       value: answer.answer_text || ""
     }))
   );
@@ -583,6 +595,130 @@ router.delete("/:taskId/answers/:answerId", requireAuth, (req, res) => {
       res.json({ message: "Код видалено" });
     }
   );
+});
+
+
+router.get("/:id/multitask", requireAuth, async (req, res) => {
+  const taskId = req.params.id;
+
+  try {
+    const task = await dbGet(`SELECT id, task_type FROM tasks WHERE id = ?`, [taskId]);
+    if (!task) return res.status(404).json({ error: "Завдання не знайдено" });
+
+    const settings = await dbGet(
+      `SELECT * FROM multitask_settings WHERE task_id = ?`,
+      [taskId]
+    );
+
+    const subtasks = await dbAll(
+      `SELECT * FROM multitask_subtasks WHERE task_id = ? ORDER BY sort_order ASC, id ASC`,
+      [taskId]
+    );
+
+    res.json({
+      settings: settings || { task_id: taskId, completion_type: "ALL", required_count: null },
+      subtasks: subtasks || []
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Помилка завантаження Multitask" });
+  }
+});
+
+router.put("/:id/multitask", requireAuth, async (req, res) => {
+  const taskId = req.params.id;
+  const completionType = String(req.body.completion_type || "ALL").toUpperCase();
+  const subtasks = Array.isArray(req.body.subtasks) ? req.body.subtasks : [];
+  const requiredCount = completionType === "COUNT" ? Number(req.body.required_count) : subtasks.length;
+
+  if (!["ALL", "COUNT"].includes(completionType)) {
+    return res.status(400).json({ error: "Невірна умова проходження Multitask" });
+  }
+
+  if (!subtasks.length) {
+    return res.status(400).json({ error: "Створіть хоча б одне підзавдання" });
+  }
+
+  if (completionType === "COUNT" && (!Number.isInteger(requiredCount) || requiredCount < 1 || requiredCount > subtasks.length)) {
+    return res.status(400).json({ error: "Кількість кодів для проходження має бути від 1 до кількості підзавдань" });
+  }
+
+  const duplicate = findDuplicateCodes(
+    subtasks.map((subtask, index) => ({
+      label: `Підзавдання №${index + 1}`,
+      value: subtask.answer_text || ""
+    }))
+  );
+
+  if (duplicate) {
+    return res.status(400).json({ error: formatDuplicateCodeMessage(duplicate) });
+  }
+
+  try {
+    await dbRun("BEGIN TRANSACTION");
+
+    await dbRun(
+      `UPDATE tasks SET task_type = 'MULTITASK', required_main_answers = ?, hide_answers_block = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [completionType === "COUNT" ? requiredCount : subtasks.length, taskId]
+    );
+
+    await dbRun(`DELETE FROM team_multitask_hint_purchases WHERE multitask_subtask_id IN (SELECT id FROM multitask_subtasks WHERE task_id = ?)`, [taskId]);
+    await dbRun(`DELETE FROM multitask_subtasks WHERE task_id = ?`, [taskId]);
+    await dbRun(`DELETE FROM team_found_answers WHERE task_answer_id IN (SELECT id FROM task_answers WHERE task_id = ? AND answer_type = 'MAIN')`, [taskId]);
+    await dbRun(`DELETE FROM task_answers WHERE task_id = ? AND answer_type = 'MAIN'`, [taskId]);
+    await dbRun(`DELETE FROM multitask_settings WHERE task_id = ?`, [taskId]);
+
+    await dbRun(
+      `INSERT INTO multitask_settings (task_id, completion_type, required_count) VALUES (?, ?, ?)`,
+      [taskId, completionType, completionType === "COUNT" ? requiredCount : null]
+    );
+
+    for (let index = 0; index < subtasks.length; index += 1) {
+      const subtask = subtasks[index] || {};
+      const sortOrder = index + 1;
+      const answerText = String(subtask.answer_text || "").trim();
+      const description = String(subtask.description || "");
+      const comment = String(subtask.comment || "");
+      const hintType = String(subtask.hint_type || "NONE").toUpperCase();
+
+      if (!["NONE", "TIMED", "PAID"].includes(hintType)) {
+        throw new Error("Невірний тип підказки");
+      }
+
+      const answerResult = await dbRun(
+        `INSERT INTO task_answers (task_id, answer_text, answer_type, description, time_modifier_seconds, comment, sort_order)
+         VALUES (?, ?, 'MAIN', ?, 0, ?, ?)`,
+        [taskId, answerText, description, comment, sortOrder]
+      );
+
+      await dbRun(
+        `INSERT INTO multitask_subtasks (
+          task_id, sort_order, content, answer_text, description, comment,
+          hint_type, hint_text, hint_after_seconds, hint_purchase_after_seconds,
+          hint_purchase_value, task_answer_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          taskId,
+          sortOrder,
+          String(subtask.content || ""),
+          answerText,
+          description,
+          comment,
+          hintType,
+          String(subtask.hint_text || ""),
+          Math.max(0, Number(subtask.hint_after_seconds) || 0),
+          Math.max(0, Number(subtask.hint_purchase_after_seconds) || 0),
+          Math.max(0, Number(subtask.hint_purchase_value) || 0),
+          answerResult.lastID
+        ]
+      );
+    }
+
+    await dbRun("COMMIT");
+    res.json({ message: "Multitask збережено" });
+  } catch (error) {
+    try { await dbRun("ROLLBACK"); } catch (rollbackError) {}
+    res.status(500).json({ error: error.message || "Помилка збереження Multitask" });
+  }
 });
 
 module.exports = router;

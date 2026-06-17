@@ -69,6 +69,7 @@
       <div id="taskContent" class="task-content"></div>
 
       <div id="olympiadBlock" class="olympiad-player-block hidden"></div>
+      <div id="multitaskBlock" class="multitask-player-block hidden"></div>
 
       <div id="formatBlock" class="info-block hidden">
         <h3>Відповіді</h3>
@@ -97,6 +98,7 @@ let currentFoundAnswers = [];
 let currentTeamName = "";
 let currentTask = null;
 let currentOlympiad = null;
+let currentMultitask = null;
 let olympiadTimerInterval = null;
 let olympiadPurchaseReady = false;
 let previousOlympiadPurchaseReady = null;
@@ -216,6 +218,7 @@ async function loadGame() {
   currentAnswers = result.answers || [];
   currentFoundAnswers = result.found_answers || [];
   currentOlympiad = result.olympiad || null;
+  currentMultitask = result.multitask || null;
   currentTeamName = result.game.team_name || "";
 
   document.getElementById("teamNameDisplay").textContent = currentTeamName;
@@ -230,6 +233,7 @@ async function loadGame() {
 
   renderContent(result.content || []);
   renderOlympiad();
+  renderMultitask();
   renderFormat();
   renderHintsAndAutoTransition(result.hints || [], result.task);
 }
@@ -496,6 +500,11 @@ async function buyOlympiadCell(cellNumber) {
     renderOlympiad();
   }
 
+  if (result.multitask) {
+    currentMultitask = result.multitask;
+    renderMultitask();
+  }
+
   if (result.task_completed) {
     setTimeout(loadGame, 700);
   }
@@ -506,6 +515,142 @@ document.addEventListener("keydown", event => {
     closeOlympiadPreviewModal();
   }
 });
+
+
+function parseMultitaskBlocks(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [{
+      type: "SECTION",
+      content: JSON.stringify({
+        columns: [
+          {
+            width: 100,
+            blocks: [
+              {
+                type: "TEXT",
+                content: JSON.stringify({
+                  html: `<p>${escapeHtml(String(value || ""))}</p>`,
+                  text: String(value || ""),
+                  format: "tiptap"
+                })
+              }
+            ]
+          }
+        ]
+      })
+    }];
+  }
+}
+
+function renderMultitaskContent(value) {
+  const blocks = parseMultitaskBlocks(value);
+  if (!blocks.length) return "";
+  return QEContentRenderer.renderBlocks(blocks);
+}
+
+function renderMultitask() {
+  const block = document.getElementById("multitaskBlock");
+  if (!block) return;
+
+  if (!currentMultitask || !Array.isArray(currentMultitask.subtasks)) {
+    block.classList.add("hidden");
+    block.innerHTML = "";
+    return;
+  }
+
+  block.classList.remove("hidden");
+  block.innerHTML = `
+    <div class="multitask-player-list">
+      ${currentMultitask.subtasks.map(subtask => renderMultitaskSubtask(subtask)).join("")}
+    </div>
+  `;
+
+  block.querySelectorAll('[data-multitask-buy-hint]').forEach(button => {
+    button.addEventListener("click", () => buyMultitaskHint(Number(button.dataset.multitaskBuyHint)));
+  });
+
+  QEContentRenderer.resizeHtmlFrames(block);
+}
+
+function renderMultitaskSubtask(subtask) {
+  if (subtask.is_found) {
+    const comment = String(subtask.comment || "").trim();
+    return `
+      <div class="multitask-subtask-player done">
+        <strong>${subtask.sort_order}. ${escapeHtml(subtask.answer_text || "")}</strong>
+        ${comment ? `<span class="multitask-found-comment">— ${escapeHtml(comment)}</span>` : ""}
+      </div>
+    `;
+  }
+
+  const description = String(subtask.description || "").trim();
+  return `
+    <div class="multitask-subtask-player">
+      <div class="multitask-subtask-number">${subtask.sort_order}</div>
+      <div class="multitask-subtask-content">${renderMultitaskContent(subtask.content || "")}</div>
+      ${description ? `<div class="multitask-answer-format">Формат відповіді: ${escapeHtml(description)}</div>` : ""}
+      ${renderMultitaskHint(subtask)}
+    </div>
+  `;
+}
+
+function renderMultitaskHint(subtask) {
+  const hintType = subtask.hint_type || "NONE";
+  const hintText = String(subtask.hint_text || "").trim();
+  if (hintType === "NONE" || !hintText) return "";
+
+  const elapsed = getElapsedSecondsFromOpenedAt(currentTask?.opened_at);
+
+  if (hintType === "TIMED") {
+    const after = Number(subtask.hint_after_seconds) || 0;
+    if (elapsed >= after) {
+      return `<div class="multitask-hint-text"><strong>Підказка:</strong> ${escapeHtml(hintText)}</div>`;
+    }
+    return `<div class="multitask-hint-wait">Підказка зʼявиться через: ${formatSeconds(after - elapsed)}</div>`;
+  }
+
+  if (hintType === "PAID") {
+    if (subtask.hint_purchased) {
+      return `<div class="multitask-hint-text"><strong>Підказка:</strong> ${escapeHtml(hintText)}</div>`;
+    }
+    const after = Number(subtask.hint_purchase_after_seconds) || 0;
+    const price = Math.max(0, Number(subtask.hint_purchase_value) || 0);
+    if (elapsed >= after) {
+      return `<button type="button" class="multitask-buy-hint-btn" data-multitask-buy-hint="${subtask.id}">Купити підказку (+${price} сек)</button>`;
+    }
+    return `<div class="multitask-hint-wait">Можливість купити підказку зʼявиться через: ${formatSeconds(after - elapsed)}</div>`;
+  }
+
+  return "";
+}
+
+async function buyMultitaskHint(subtaskId) {
+  const subtask = (currentMultitask?.subtasks || []).find(item => Number(item.id) === Number(subtaskId));
+  const price = Math.max(0, Number(subtask?.hint_purchase_value) || 0);
+  const confirmed = confirm(`Купити підказку до підзавдання №${subtask?.sort_order || ""}?\n\nКоманді буде нараховано штраф: +${price} сек.`);
+  if (!confirmed) return;
+
+  const response = await fetch(`/api/play/${pin}/multitask/subtask/${subtaskId}/hint/purchase`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    showPlainAnswerMessage(result.error || "Помилка купівлі підказки", "error");
+    return;
+  }
+
+  showPlainAnswerMessage(result.message || "Підказку куплено", "success");
+  if (result.multitask) {
+    currentMultitask = result.multitask;
+    renderMultitask();
+  }
+}
 
 function renderFormat() {
   const block = document.getElementById("formatBlock");
@@ -586,6 +731,17 @@ function renderHintsAndAutoTransition(hints, task) {
   }
 
   previousOlympiadPurchaseReady = null;
+
+  if (task && task.task_type === "MULTITASK" && currentMultitask) {
+    block.classList.add("hidden");
+    container.innerHTML = "";
+
+    hintsInterval = setInterval(() => {
+      renderMultitask();
+    }, 1000);
+
+    return;
+  }
 
   if (task && task.task_type === "OLYMPIAD" && currentOlympiad?.settings) {
     block.classList.remove("hidden");
@@ -913,6 +1069,11 @@ async function submitAnswer() {
   if (result.olympiad) {
     currentOlympiad = result.olympiad;
     renderOlympiad();
+  }
+
+  if (result.multitask) {
+    currentMultitask = result.multitask;
+    renderMultitask();
   }
 
   if (result.task_completed) {
