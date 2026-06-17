@@ -133,6 +133,75 @@ function getGameTimeSeconds(team) {
   return Math.max(0, fullTime - bonus + penalty);
 }
 
+function isScoreMode() {
+  const type = String(currentRun?.winner_type || "TIME").toUpperCase();
+  return type === "SCORE" || type === "POINTS";
+}
+
+function getTeamScore(team) {
+  return Number(team.score_total) || 0;
+}
+
+function getTeamScoreReachedAt(team) {
+  return team.score_reached_at || team.finished_at || team.calculated_finished_at || team.created_at || "";
+}
+
+
+function getScoreEventsForTask(team, taskId) {
+  return (team.score_events || []).filter(event => Number(event.task_id) === Number(taskId));
+}
+
+function getScoreEventsOutsideTasks(team) {
+  return (team.score_events || []).filter(event => !event.task_id);
+}
+
+function getTeamScoreGameTimeSeconds(team) {
+  const start = team.started_at || team.created_at;
+  const end = getTeamScoreReachedAt(team);
+  if (!start || !end) return null;
+  const startDate = new Date(String(start).replace(" ", "T") + "Z");
+  const endDate = new Date(String(end).replace(" ", "T") + "Z");
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  return Math.max(0, Math.floor((endDate.getTime() - startDate.getTime()) / 1000));
+}
+
+function formatScoreNumber(value) {
+  const number = Number(value) || 0;
+  if (number > 0) return `<span class="stat-bonus">+${number}</span>`;
+  if (number < 0) return `<span class="stat-penalty">-${Math.abs(number)}</span>`;
+  return "0";
+}
+
+function formatScoreTaskCell(team, task) {
+  const events = getScoreEventsForTask(team, task.id);
+  if (!task.opened_at && !events.length) {
+    return `<div class="stat-empty">-</div>`;
+  }
+
+  const sum = events.reduce((total, event) => total + (Number(event.points) || 0), 0);
+  const lastEvent = events.length ? events[events.length - 1] : null;
+  const finish = lastEvent?.created_at || task.completed_at || null;
+
+  if (!finish && task.opened_at) {
+    return `
+      <div class="task-main-time in-progress-text">в процесі</div>
+      <div class="task-time-details">(${escapeHtml(QETime.formatLocalTime(task.opened_at))} — -)</div>
+    `;
+  }
+
+  return `
+    <div class="task-main-time">${formatScoreNumber(sum)}</div>
+    <div class="task-time-details">(${escapeHtml(QETime.formatLocalTime(task.opened_at))} — ${escapeHtml(QETime.formatLocalTime(finish))})</div>
+  `;
+}
+
+function formatScoreAdjustments(team) {
+  const events = (team.score_events || []).filter(event => event.event_type !== "TASK_COMPLETE");
+  const sum = events.reduce((total, event) => total + (Number(event.points) || 0), 0);
+  if (!events.length || sum === 0) return "-";
+  return `<div>${formatScoreNumber(sum)}</div>`;
+}
+
 function formatTaskCell(task) {
   if (!task.cell) {
     return `<div class="stat-empty">-</div>`;
@@ -194,6 +263,30 @@ function formatBonusPenalty(team) {
 }
 
 function prepareRanking(teams) {
+  if (isScoreMode()) {
+    const ranked = [...teams].sort((a, b) => {
+      const scoreDiff = getTeamScore(b) - getTeamScore(a);
+      if (scoreDiff !== 0) return scoreDiff;
+      const timeA = getTeamScoreGameTimeSeconds(a);
+      const timeB = getTeamScoreGameTimeSeconds(b);
+      if (timeA !== null && timeB !== null && timeA !== timeB) return timeA - timeB;
+      return String(getTeamScoreReachedAt(a)).localeCompare(String(getTeamScoreReachedAt(b)));
+    });
+
+    ranked.forEach((team, index) => {
+      team.place = index + 1;
+      if (index === 0) {
+        team.gap_from_previous_score = null;
+        team.gap_from_first_score = null;
+      } else {
+        team.gap_from_previous_score = getTeamScore(team) - getTeamScore(ranked[index - 1]);
+        team.gap_from_first_score = getTeamScore(team) - getTeamScore(ranked[0]);
+      }
+    });
+
+    return ranked;
+  }
+
   const finishedTeams = teams
     .filter(team => getGameTimeSeconds(team) !== null)
     .sort((a, b) => getGameTimeSeconds(a) - getGameTimeSeconds(b));
@@ -871,6 +964,106 @@ const adjustments = result.adjustments || [];
   }
 }
 
+function formatScoreEventType(type) {
+  const labels = {
+    TASK_COMPLETE: "Завдання виконано",
+    BONUS_CODE: "Бонусний код",
+    PENALTY_CODE: "Штрафний код",
+    HINT_PURCHASE: "Купівля підказки",
+    OLYMPIAD_PURCHASE: "Купівля коду олімпійки",
+    AUTO_TRANSITION: "Автоперехід",
+    MANUAL_BONUS: "Ручний бонус",
+    MANUAL_PENALTY: "Ручний штраф"
+  };
+
+  return labels[type] || type || "Подія";
+}
+
+function formatScoreValue(points) {
+  const value = Number(points) || 0;
+  const sign = value >= 0 ? "+" : "-";
+  const css = value >= 0 ? "stat-bonus" : "stat-penalty";
+  return `<span class="${css}">${sign}${Math.abs(value)} балів</span>`;
+}
+
+
+function renderScoreTaskLog(teamId, taskId) {
+  selectedCell = { teamId: Number(teamId), taskId: Number(taskId) };
+  refreshStatisticsTableHighlight();
+
+  const team = currentTeams.find(item => Number(item.id) === Number(teamId));
+  const task = currentTasks.find(item => Number(item.id) === Number(taskId));
+  const block = document.getElementById("detailsBlock");
+  block.classList.remove("hidden");
+
+  if (!team || !task) {
+    block.innerHTML = `<div class="info-block">Команду або завдання не знайдено</div>`;
+    return;
+  }
+
+  const events = getScoreEventsForTask(team, taskId);
+  const total = events.reduce((sum, event) => sum + (Number(event.points) || 0), 0);
+
+  block.innerHTML = `
+    <div class="info-block">
+      <h2>Лог балів за завдання: ${escapeHtml(team.name)} — Завдання ${escapeHtml(task.sort_order || "")}</h2>
+      ${renderDetailsTable(
+        events,
+        "На цьому завданні ще немає нарахувань або списань балів.",
+        ["Тип", "Значення", "Коментар", "Час"],
+        item => `
+          <tr>
+            <td>${escapeHtml(formatScoreEventType(item.event_type))}</td>
+            <td>${formatScoreValue(item.points)}</td>
+            <td>${escapeHtml(item.comment || "-")}</td>
+            <td>${escapeHtml(QETime.formatLocalDateTime(item.created_at))}</td>
+          </tr>
+        `
+      )}
+      <p><strong>Разом за завдання:</strong> ${formatScoreValue(total)}</p>
+    </div>
+  `;
+
+  block.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderTeamScoreLog(teamId) {
+  selectedCell = { teamId: Number(teamId), taskId: null, specialColumn: "score" };
+  refreshStatisticsTableHighlight();
+
+  const team = currentTeams.find(item => Number(item.id) === Number(teamId));
+  const block = document.getElementById("detailsBlock");
+  block.classList.remove("hidden");
+
+  if (!team) {
+    block.innerHTML = `<div class="info-block">Команду не знайдено</div>`;
+    return;
+  }
+
+  const events = team.score_events || [];
+  block.innerHTML = `
+    <div class="info-block">
+      <h2>Лог нарахування балів: ${escapeHtml(team.name)}</h2>
+      ${renderDetailsTable(
+        events,
+        "У команди ще немає нарахувань або списань балів.",
+        ["Завдання", "Тип", "Значення", "Коментар", "Час"],
+        item => `
+          <tr>
+            <td>${item.task_sort_order ? `Завдання ${item.task_sort_order}` : "-"}</td>
+            <td>${escapeHtml(formatScoreEventType(item.event_type))}</td>
+            <td>${formatScoreValue(item.points)}</td>
+            <td>${escapeHtml(item.comment || "-")}</td>
+            <td>${escapeHtml(QETime.formatLocalDateTime(item.created_at))}</td>
+          </tr>
+        `
+      )}
+      <p><strong>Разом:</strong> ${escapeHtml(String(getTeamScore(team)))} балів</p>
+    </div>
+  `;
+  block.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 async function renderTeamAdjustments(teamId) {
 selectedCell = {
   teamId: Number(teamId),
@@ -1263,6 +1456,82 @@ async function loadStatistics() {
       </span>
     </div>
   `;
+
+  if (isScoreMode()) {
+    block.innerHTML = `
+      ${bulkActionsHtml}
+      <div class="statistics-table-wrapper">
+        <table class="statistics-table">
+          <thead>
+            <tr>
+              ${!isRunArchived() ? "<th>✓</th>" : ""}
+              <th>Команда</th>
+              <th>Час старту</th>
+              ${tasks.map(task => `
+                <th>
+                  Завдання ${task.sort_order}<br>
+                  <small>${escapeHtml(task.title || "")}</small>
+                </th>
+              `).join("")}
+              <th>Час останнього<br>нарахування балів</th>
+              <th>Ігровий час</th>
+              <th data-special-column="score">Кількість<br>балів</th>
+              <th>Відставання від<br>попередньої</th>
+              <th>Відставання від<br>першої</th>
+              <th>Місце</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${teams.map(team => `
+              <tr>
+                ${!isRunArchived() ? `
+                  <td>
+                    <input
+                      type="checkbox"
+                      class="team-bulk-checkbox"
+                      value="${team.id}"
+                      ${selectedTeamIds.has(Number(team.id)) ? "checked" : ""}
+                      onchange="syncSelectedTeamsFromCheckboxes()"
+                      aria-label="Обрати команду ${escapeHtml(team.name)}"
+                    >
+                  </td>
+                ` : ""}
+                <td><strong>${escapeHtml(team.name)}</strong></td>
+                <td class="time-stat-cell">${escapeHtml(QETime.formatLocalTime(team.started_at))}</td>
+                ${tasks.map(task => {
+                  const teamTask = (team.tasks || []).find(item => Number(item.id) === Number(task.id)) || task;
+                  return `
+                    <td
+                      class="time-stat-cell clickable-stat-cell"
+                      onclick="renderScoreTaskLog(${team.id}, ${task.id})"
+                      data-team-id="${team.id}"
+                      data-task-id="${task.id}"
+                    >
+                      ${formatScoreTaskCell(team, teamTask)}
+                    </td>
+                  `;
+                }).join("")}
+                <td>${escapeHtml(QETime.formatLocalTime(getTeamScoreReachedAt(team)))}</td>
+                <td class="time-stat-cell">${getTeamScoreGameTimeSeconds(team) === null ? "-" : escapeHtml(formatDuration(getTeamScoreGameTimeSeconds(team)))}</td>
+                <td
+                  class="time-stat-cell clickable-stat-cell main-time-cell"
+                  onclick="renderTeamScoreLog(${team.id})"
+                  data-team-id="${team.id}"
+                  data-special-column="score"
+                  title="Показати лог нарахування балів"
+                >${escapeHtml(String(getTeamScore(team)))} балів</td>
+                <td>${team.gap_from_previous_score === null || team.gap_from_previous_score === undefined ? "-" : escapeHtml(String(team.gap_from_previous_score))}</td>
+                <td>${team.gap_from_first_score === null || team.gap_from_first_score === undefined ? "-" : escapeHtml(String(team.gap_from_first_score))}</td>
+                <td class="place-cell">${team.place || "-"}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+    updateBulkActionsState();
+    return;
+  }
 
   block.innerHTML = `
     ${bulkActionsHtml}

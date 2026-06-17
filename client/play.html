@@ -99,6 +99,12 @@ let currentTeamName = "";
 let currentTask = null;
 let currentOlympiad = null;
 let currentMultitask = null;
+let currentGameWinnerType = "TIME";
+
+function isScoreModeValue(value) {
+  const type = String(value || "TIME").toUpperCase();
+  return type === "SCORE" || type === "POINTS";
+}
 let olympiadTimerInterval = null;
 let olympiadPurchaseReady = false;
 let previousOlympiadPurchaseReady = null;
@@ -214,6 +220,7 @@ async function loadGame() {
 
   showOnly("gameScreen");
 
+  currentGameWinnerType = result.game?.winner_type || "TIME";
   currentTask = result.task;
   currentAnswers = result.answers || [];
   currentFoundAnswers = result.found_answers || [];
@@ -296,7 +303,9 @@ function renderOlympiadCellContent(cell) {
 
 function formatOlympiadPurchaseLabel(value) {
   const amount = Math.max(0, Number(value) || 0);
-  return `Купити (+${amount} сек)`;
+  return isScoreModeValue(currentGameWinnerType)
+    ? `Купити (-${amount} балів)`
+    : `Купити (+${amount} сек)`;
 }
 
 function renderOlympiad() {
@@ -404,7 +413,12 @@ function renderOlympiad() {
   block.innerHTML = html;
 
   block.querySelectorAll("[data-olympiad-preview]").forEach(preview => {
-    preview.addEventListener("click", () => openOlympiadPreviewModal(Number(preview.dataset.olympiadPreview)));
+    preview.addEventListener("click", () => {
+      if (preview.dataset.scaled !== "1") return;
+      if (preview.dataset.scaled === "1") {
+        openOlympiadPreviewModal(Number(preview.dataset.olympiadPreview));
+      }
+    });
   });
 
   block.querySelectorAll("[data-olympiad-buy-cell]").forEach(button => {
@@ -424,8 +438,14 @@ function renderOlympiad() {
     });
   }
 
-  fitOlympiadPreviews();
   QEContentRenderer.resizeHtmlFrames(block);
+  fitOlympiadPreviews();
+  setTimeout(fitOlympiadPreviews, 0);
+  setTimeout(fitOlympiadPreviews, 250);
+  block.querySelectorAll(".olympiad-scaled-preview img, .olympiad-scaled-preview video, .olympiad-scaled-preview audio").forEach(media => {
+    media.addEventListener("load", fitOlympiadPreviews, { once: true });
+    media.addEventListener("loadedmetadata", fitOlympiadPreviews, { once: true });
+  });
 }
 
 function fitOlympiadPreviews() {
@@ -447,6 +467,10 @@ function fitOlympiadPreviews() {
     inner.style.transform = `scale(${scale})`;
     preview.style.width = `${Math.ceil(width * scale)}px`;
     preview.style.height = `${Math.ceil(height * scale)}px`;
+    const isScaled = scale < 0.995;
+    preview.dataset.scaled = isScaled ? "1" : "0";
+    preview.classList.toggle("is-clickable", isScaled);
+    preview.title = isScaled ? "Натисніть для збільшення" : "";
   });
 }
 
@@ -478,7 +502,7 @@ async function buyOlympiadCell(cellNumber) {
   const cell = (currentOlympiad?.cells || []).find(item => Number(item.cell_number) === Number(cellNumber));
   const purchaseValue = Math.max(0, Number(cell?.purchase_value) || 0);
 
-  const confirmed = confirm(`Купити код клітинки №${cellNumber}?\n\nКоманді буде нараховано штраф: +${purchaseValue} сек.`);
+  const confirmed = confirm(`Купити код клітинки №${cellNumber}?\n\nКоманді буде нараховано штраф: ${isScoreModeValue(currentGameWinnerType) ? `-${purchaseValue} балів` : `+${purchaseValue} сек`}.`);
   if (!confirmed) return;
 
   const response = await fetch(`/api/play/${pin}/olympiad/cell/${cellNumber}/purchase`, {
@@ -620,7 +644,7 @@ function renderMultitaskHint(subtask) {
     const after = Number(subtask.hint_purchase_after_seconds) || 0;
     const price = Math.max(0, Number(subtask.hint_purchase_value) || 0);
     if (elapsed >= after) {
-      return `<button type="button" class="multitask-buy-hint-btn" data-multitask-buy-hint="${subtask.id}">Купити підказку (+${price} сек)</button>`;
+      return `<button type="button" class="multitask-buy-hint-btn" data-multitask-buy-hint="${subtask.id}">Купити підказку (${isScoreModeValue(currentGameWinnerType) ? `-${price} балів` : `+${price} сек`})</button>`;
     }
     return `<div class="multitask-hint-wait">Можливість купити підказку зʼявиться через: ${formatSeconds(after - elapsed)}</div>`;
   }
@@ -631,7 +655,7 @@ function renderMultitaskHint(subtask) {
 async function buyMultitaskHint(subtaskId) {
   const subtask = (currentMultitask?.subtasks || []).find(item => Number(item.id) === Number(subtaskId));
   const price = Math.max(0, Number(subtask?.hint_purchase_value) || 0);
-  const confirmed = confirm(`Купити підказку до підзавдання №${subtask?.sort_order || ""}?\n\nКоманді буде нараховано штраф: +${price} сек.`);
+  const confirmed = confirm(`Купити підказку до підзавдання №${subtask?.sort_order || ""}?\n\nКоманді буде нараховано штраф: ${isScoreModeValue(currentGameWinnerType) ? `-${price} балів` : `+${price} сек`}.`);
   if (!confirmed) return;
 
   const response = await fetch(`/api/play/${pin}/multitask/subtask/${subtaskId}/hint/purchase`, {
@@ -789,7 +813,7 @@ function renderHintsAndAutoTransition(hints, task) {
     return;
   }
 
-  const hasHints = hints.length > 0;
+  const hasHints = hints.some(h => String(h.hint_type || "TIMED").toUpperCase() !== "NONE");
   const hasAutoTransition =
     Number(task.auto_transition_minutes) > 0;
 
@@ -797,12 +821,22 @@ function renderHintsAndAutoTransition(hints, task) {
 
   const elapsedSeconds = getElapsedSecondsFromOpenedAt(task.opened_at);
 
-  const hintsState = hints.map(hint => ({
-    id: hint.id,
-    sort_order: hint.sort_order,
-    content: hint.content || "",
-    remaining: Math.max(0, Number(hint.show_after_seconds || 0) - elapsedSeconds)
-  }));
+  const hintsState = hints.map(hint => {
+    const hintType = String(hint.hint_type || "TIMED").toUpperCase();
+    const delay = hintType === "PAID"
+      ? Number(hint.purchase_after_seconds || 0)
+      : Number(hint.show_after_seconds || 0);
+
+    return {
+      id: hint.id,
+      sort_order: hint.sort_order,
+      content: hint.content || "",
+      hint_type: hintType,
+      purchase_value: Number(hint.purchase_value) || 0,
+      purchased: Boolean(hint.purchased_at),
+      remaining: Math.max(0, delay - elapsedSeconds)
+    };
+  }).filter(hint => hint.hint_type !== "NONE");
 
   const autoState = hasAutoTransition
     ? {
@@ -900,6 +934,30 @@ function renderHintsAndAutoState(hintsState, autoState, hasHints, hasAutoTransit
   }
 
   container.innerHTML = hintsHtml + autoHtml;
+
+  container.querySelectorAll('[data-buy-standard-hint]').forEach(button => {
+    button.addEventListener('click', () => buyStandardHint(Number(button.dataset.buyStandardHint)));
+  });
+}
+
+async function buyStandardHint(hintId) {
+  const response = await fetch(`/api/play/${pin}/hint/${hintId}/purchase`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    showPlainAnswerMessage(result.error || "Помилка купівлі підказки", "error");
+    return;
+  }
+
+  showPlainAnswerMessage(result.message || "Підказку куплено", "success");
+  if (Array.isArray(result.hints)) {
+    renderHintsAndAutoTransition(result.hints, currentTask);
+  } else {
+    loadGame();
+  }
 }
 
 async function doAutoTransition() {

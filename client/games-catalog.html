@@ -23,11 +23,12 @@
               <th>Кількість завдань</th>
               <th>Статус</th>
               <th>Запуски</th>
+              <th>Дії</th>
             </tr>
           </thead>
           <tbody id="gamesTableBody">
             <tr>
-              <td colspan="6">Завантаження...</td>
+              <td colspan="7">Завантаження...</td>
             </tr>
           </tbody>
         </table>
@@ -42,6 +43,14 @@
         .replaceAll('"', "&quot;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;");
+    }
+
+    function escapeJs(text) {
+      return String(text || "")
+        .replaceAll("\\", "\\\\")
+        .replaceAll("'", "\\'")
+        .replaceAll("\n", " ")
+        .replaceAll("\r", " ");
     }
 
     async function checkAuth() {
@@ -59,14 +68,14 @@
       const tableBody = document.getElementById("gamesTableBody");
 
       if (!response.ok) {
-        tableBody.innerHTML = `<tr><td colspan="6">${escapeHtml(result.error || "Помилка завантаження")}</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="7">${escapeHtml(result.error || "Помилка завантаження")}</td></tr>`;
         return;
       }
 
       const games = result.games || [];
 
       if (!games.length) {
-        tableBody.innerHTML = '<tr><td colspan="6">Ігор поки немає.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="7">Ігор поки немає.</td></tr>';
         return;
       }
 
@@ -82,6 +91,9 @@
           <td>
             <button onclick="openRuns(${game.id})" type="button">Переглянути запуски</button>
           </td>
+          <td>
+            <button onclick="copyGame(${game.id}, '${escapeJs(game.title)}', '${escapeJs(game.description || "")}', '${escapeJs(game.game_type)}', '${escapeJs(game.winner_type)}')" type="button">Створити копію гри</button>
+          </td>
         </tr>
       `).join("");
     }
@@ -92,6 +104,29 @@
 
     function openRuns(gameId) {
       window.location.href = `/runs.html?id=${gameId}`;
+    }
+
+    async function copyGame(gameId, oldTitle, oldDescription, oldGameType, oldWinnerType) {
+      const title = prompt("Нова назва гри", `${oldTitle} — копія`);
+      if (!title || !title.trim()) return;
+
+      const description = prompt("Опис нової гри", oldDescription || "") || "";
+      const game_type = (prompt("Тип видачі завдань: LINEAR або STORM", oldGameType || "LINEAR") || oldGameType || "LINEAR").trim().toUpperCase();
+      const winner_type = (prompt("Умова перемоги: TIME або POINTS", oldWinnerType || "TIME") || oldWinnerType || "TIME").trim().toUpperCase();
+
+      const response = await fetch(`/api/games/${gameId}/copy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, description, game_type, winner_type })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        alert(result.error || "Помилка створення копії гри");
+        return;
+      }
+
+      window.location.href = `/game.html?id=${result.game.id}`;
     }
 
     async function init() {

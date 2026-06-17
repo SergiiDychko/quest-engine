@@ -83,6 +83,58 @@ function getGameTimeSeconds(team) {
   return Math.max(0, fullTime - bonus + penalty);
 }
 
+function isScoreMode() {
+  const type = String(currentStatistics?.run?.winner_type || "TIME").toUpperCase();
+  return type === "SCORE" || type === "POINTS";
+}
+
+function getTeamScore(team) {
+  return Number(team.score_total) || 0;
+}
+
+function getTeamScoreReachedAt(team) {
+  return team.score_reached_at || team.finished_at || team.calculated_finished_at || team.created_at || "";
+}
+
+
+function getScoreEventsForTask(team, taskId) {
+  return (team.score_events || []).filter(event => Number(event.task_id) === Number(taskId));
+}
+
+function getTeamScoreGameTimeSeconds(team) {
+  const start = team.started_at || team.created_at;
+  const end = getTeamScoreReachedAt(team);
+  if (!start || !end) return null;
+  const startDate = new Date(String(start).replace(" ", "T") + "Z");
+  const endDate = new Date(String(end).replace(" ", "T") + "Z");
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  return Math.max(0, Math.floor((endDate.getTime() - startDate.getTime()) / 1000));
+}
+
+function formatScoreNumber(value) {
+  const number = Number(value) || 0;
+  if (number > 0) return `<span class="stat-bonus">+${number}</span>`;
+  if (number < 0) return `<span class="stat-penalty">-${Math.abs(number)}</span>`;
+  return "0";
+}
+
+function formatScoreTaskCell(team, task) {
+  const events = getScoreEventsForTask(team, task.id);
+  if (!task.opened_at && !events.length) return `<div class="stat-empty">-</div>`;
+  const sum = events.reduce((total, event) => total + (Number(event.points) || 0), 0);
+  const lastEvent = events.length ? events[events.length - 1] : null;
+  const finish = lastEvent?.created_at || task.completed_at || null;
+  if (!finish && task.opened_at) return `<div class="task-main-time in-progress-text">в процесі</div><div class="task-time-details">(${escapeHtml(QETime.formatLocalTime(task.opened_at))} — -)</div>`;
+  return `<div class="task-main-time">${formatScoreNumber(sum)}</div><div class="task-time-details">(${escapeHtml(QETime.formatLocalTime(task.opened_at))} — ${escapeHtml(QETime.formatLocalTime(finish))})</div>`;
+}
+
+function formatScoreAdjustments(team) {
+  const events = (team.score_events || []).filter(event => event.event_type !== "TASK_COMPLETE");
+  const sum = events.reduce((total, event) => total + (Number(event.points) || 0), 0);
+  if (!events.length || sum === 0) return "-";
+  return `<div>${formatScoreNumber(sum)}</div>`;
+}
+
 function formatTaskCell(task) {
   if (!task.cell || task.cell.status === "not_started") {
     return `<div class="stat-empty">-</div>`;
@@ -131,6 +183,30 @@ function formatBonusPenalty(team) {
 }
 
 function prepareRanking(teams) {
+  if (isScoreMode()) {
+    const ranked = [...teams].sort((a, b) => {
+      const scoreDiff = getTeamScore(b) - getTeamScore(a);
+      if (scoreDiff !== 0) return scoreDiff;
+      const timeA = getTeamScoreGameTimeSeconds(a);
+      const timeB = getTeamScoreGameTimeSeconds(b);
+      if (timeA !== null && timeB !== null && timeA !== timeB) return timeA - timeB;
+      return String(getTeamScoreReachedAt(a)).localeCompare(String(getTeamScoreReachedAt(b)));
+    });
+
+    ranked.forEach((team, index) => {
+      team.place = index + 1;
+      if (index === 0) {
+        team.gap_from_previous_score = null;
+        team.gap_from_first_score = null;
+      } else {
+        team.gap_from_previous_score = getTeamScore(team) - getTeamScore(ranked[index - 1]);
+        team.gap_from_first_score = getTeamScore(team) - getTeamScore(ranked[0]);
+      }
+    });
+
+    return ranked;
+  }
+
   const finishedTeams = teams
     .filter(team => getGameTimeSeconds(team) !== null)
     .sort((a, b) => getGameTimeSeconds(a) - getGameTimeSeconds(b));
@@ -173,6 +249,83 @@ function renderModeButtons() {
   `;
 }
 
+
+function renderScoreBriefTable(teams) {
+  return `
+    <div class="statistics-table-wrapper public-statistics-table-wrapper">
+      <table class="statistics-table public-statistics-table public-statistics-brief-table">
+        <thead>
+          <tr>
+            <th>Команда</th>
+            <th>Ігровий час</th>
+            <th>Кількість<br>балів</th>
+            <th>Відставання від<br>попередньої</th>
+            <th>Відставання від<br>першої</th>
+            <th>Місце</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${teams.map(team => `
+            <tr>
+              <td class="team-name-cell"><strong>${escapeHtml(team.name)}</strong></td>
+              <td class="time-stat-cell main-time-cell">${getTeamScoreGameTimeSeconds(team) === null ? "-" : escapeHtml(formatDuration(getTeamScoreGameTimeSeconds(team)))}</td>
+              <td class="time-stat-cell main-time-cell">${escapeHtml(String(getTeamScore(team)))} балів</td>
+              <td>${team.gap_from_previous_score === null || team.gap_from_previous_score === undefined ? "-" : escapeHtml(String(team.gap_from_previous_score))}</td>
+              <td>${team.gap_from_first_score === null || team.gap_from_first_score === undefined ? "-" : escapeHtml(String(team.gap_from_first_score))}</td>
+              <td class="place-cell">${team.place ? `${team.place}` : "-"}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderScoreTable(teams, tasks) {
+  return `
+    <div class="statistics-table-wrapper public-statistics-table-wrapper">
+      <table class="statistics-table public-statistics-table">
+        <thead>
+          <tr>
+            <th>Команда</th>
+            <th>Час старту</th>
+            ${tasks.map(task => `
+              <th>
+                Завдання ${task.sort_order}<br>
+                <small>${escapeHtml(task.title || "")}</small>
+              </th>
+            `).join("")}
+            <th>Час останнього<br>нарахування балів</th>
+            <th>Ігровий час</th>
+            <th>Кількість<br>балів</th>
+            <th>Відставання від<br>попередньої</th>
+            <th>Відставання від<br>першої</th>
+            <th>Місце</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${teams.map(team => `
+            <tr>
+              <td class="team-name-cell"><strong>${escapeHtml(team.name)}</strong></td>
+              <td class="time-stat-cell">${escapeHtml(QETime.formatLocalTime(team.started_at))}</td>
+              ${tasks.map(task => {
+                const teamTask = (team.tasks || []).find(item => Number(item.id) === Number(task.id)) || task;
+                return `<td class="time-stat-cell">${formatScoreTaskCell(team, teamTask)}</td>`;
+              }).join("")}
+              <td>${escapeHtml(QETime.formatLocalTime(getTeamScoreReachedAt(team)))}</td>
+              <td class="time-stat-cell">${getTeamScoreGameTimeSeconds(team) === null ? "-" : escapeHtml(formatDuration(getTeamScoreGameTimeSeconds(team)))}</td>
+              <td class="time-stat-cell main-time-cell">${escapeHtml(String(getTeamScore(team)))} балів</td>
+              <td>${team.gap_from_previous_score === null || team.gap_from_previous_score === undefined ? "-" : escapeHtml(String(team.gap_from_previous_score))}</td>
+              <td>${team.gap_from_first_score === null || team.gap_from_first_score === undefined ? "-" : escapeHtml(String(team.gap_from_first_score))}</td>
+              <td class="place-cell">${team.place ? `${team.place}` : "-"}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function renderDetailedTable(teams, tasks) {
   return `
     <div class="statistics-table-wrapper public-statistics-table-wrapper">
@@ -190,7 +343,6 @@ function renderDetailedTable(teams, tasks) {
             `).join("")}
 
             <th>Від старту<br>до фінішу</th>
-            <th>Бонуси /<br>штрафи</th>
             <th>Ігровий час</th>
             <th>Відставання від<br>попередньої</th>
             <th>Відставання від<br>першої</th>
@@ -294,6 +446,21 @@ function renderPublicStatistics(statistics) {
 
   if (!teams.length) {
     block.textContent = "У цьому запуску немає команд.";
+    return;
+  }
+
+  if (isScoreMode()) {
+    block.innerHTML = `
+      ${renderModeButtons()}
+      ${currentMode === "detailed" ? renderScoreTable(teams, tasks) : renderScoreBriefTable(teams)}
+    `;
+
+    block.querySelectorAll(".toggle-btn").forEach(button => {
+      button.addEventListener("click", () => {
+        currentMode = button.dataset.mode;
+        renderPublicStatistics(currentStatistics);
+      });
+    });
     return;
   }
 

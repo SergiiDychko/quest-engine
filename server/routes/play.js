@@ -17,6 +17,11 @@ function normalizeTeamName(value) {
     .replace(/\s+/g, " ");
 }
 
+function isScoreModeValue(value) {
+  const type = String(value || "TIME").toUpperCase();
+  return type === "SCORE" || type === "POINTS";
+}
+
 function splitUserAnswers(value) {
   return String(value || "")
     .split(",")
@@ -52,6 +57,79 @@ function dbRun(sql, params = []) {
 }
 
 
+
+async function addScoreEvent({ teamId, taskId, eventType, points, comment }) {
+  const value = Number(points) || 0;
+  if (!value) return;
+
+  await dbRun(
+    `
+    INSERT INTO team_score_events (
+      team_id,
+      task_id,
+      event_type,
+      points,
+      comment
+    )
+    VALUES (?, ?, ?, ?, ?)
+    `,
+    [teamId, taskId || null, eventType, value, comment || ""]
+  );
+}
+
+async function addTaskCompletionScoreIfNeeded(teamId, task) {
+  const points = Math.max(0, Number(task.score_points) || 0);
+  if (!points) return;
+
+  const existing = await dbGet(
+    `
+    SELECT id
+    FROM team_score_events
+    WHERE team_id = ?
+      AND task_id = ?
+      AND event_type = 'TASK_COMPLETE'
+    LIMIT 1
+    `,
+    [teamId, task.id]
+  );
+
+  if (existing) return;
+
+  await addScoreEvent({
+    teamId,
+    taskId: task.id,
+    eventType: "TASK_COMPLETE",
+    points,
+    comment: `Виконано завдання ${task.sort_order}${task.title ? `: ${task.title}` : ""}`
+  });
+}
+
+async function recordPositiveOrNegativeCodeEvent({ gameData, task, answer }) {
+  if (!isScoreModeValue(gameData.winner_type)) return;
+
+  const raw = Math.abs(Number(answer.time_modifier_seconds) || 0);
+  if (!raw) return;
+
+  if (answer.answer_type === "BONUS") {
+    await addScoreEvent({
+      teamId: gameData.team_id,
+      taskId: task.id,
+      eventType: "BONUS_CODE",
+      points: raw,
+      comment: answer.comment || answer.description || answer.answer_text
+    });
+  }
+
+  if (answer.answer_type === "PENALTY") {
+    await addScoreEvent({
+      teamId: gameData.team_id,
+      taskId: task.id,
+      eventType: "PENALTY_CODE",
+      points: -raw,
+      comment: answer.comment || answer.description || answer.answer_text
+    });
+  }
+}
 
 function generateOlympiadCellsMeta(associationCount, levelCount) {
   const x = Number(associationCount);
@@ -212,6 +290,8 @@ async function checkOlympiadCompletion(teamId, task) {
       else resolve();
     });
   });
+
+  await addTaskCompletionScoreIfNeeded(teamId, task);
 
   return {
     completed: true,
@@ -451,15 +531,20 @@ function getTaskContent(taskId, callback) {
   );
 }
 
-function getTaskHints(taskId, callback) {
+function getTaskHints(taskId, teamId, callback) {
   db.all(
     `
-    SELECT *
+    SELECT
+      task_hints.*,
+      team_hint_purchases.purchased_at AS purchased_at
     FROM task_hints
-    WHERE task_id = ?
-    ORDER BY sort_order ASC, id ASC
+    LEFT JOIN team_hint_purchases
+      ON team_hint_purchases.task_hint_id = task_hints.id
+      AND team_hint_purchases.team_id = ?
+    WHERE task_hints.task_id = ?
+    ORDER BY task_hints.sort_order ASC, task_hints.id ASC
     `,
-    [taskId],
+    [teamId || 0, taskId],
     callback
   );
 }
@@ -634,7 +719,8 @@ function completeTaskIfNeeded(teamId, task, callback) {
       updateError => {
         if (updateError) return callback(updateError);
 
-        openNextTaskAt(
+        addTaskCompletionScoreIfNeeded(teamId, task)
+          .then(() => openNextTaskAt(
           teamId,
           task.game_id,
           task.sort_order,
@@ -649,7 +735,8 @@ function completeTaskIfNeeded(teamId, task, callback) {
               required_main_answers: requiredMainAnswers
             });
           }
-        );
+        ))
+          .catch(scoreError => callback(scoreError));
       }
     );
   }
@@ -758,7 +845,7 @@ router.get("/:pin", (req, res) => {
           });
         }
 
-        getTaskHints(task.id, (hintsError, hints) => {
+        getTaskHints(task.id, gameData.team_id, (hintsError, hints) => {
           if (hintsError) {
             return res.status(500).json({
               error: "Помилка завантаження підказок"
@@ -1066,7 +1153,9 @@ router.post("/:pin/answer", async (req, res) => {
         ]
       );
 
-      if (foundAnswer.answer_type === "BONUS") {
+      await recordPositiveOrNegativeCodeEvent({ gameData, task, answer: foundAnswer });
+
+      if (foundAnswer.answer_type === "BONUS" && !isScoreModeValue(gameData.winner_type)) {
   await dbRun(
     `
     UPDATE team_tasks
@@ -1103,7 +1192,7 @@ router.post("/:pin/answer", async (req, res) => {
   );
 }
 
-      if (foundAnswer.answer_type === "PENALTY") {
+      if (foundAnswer.answer_type === "PENALTY" && !isScoreModeValue(gameData.winner_type)) {
   await dbRun(
     `
     UPDATE team_tasks
@@ -1227,7 +1316,6 @@ router.post("/:pin/answer", async (req, res) => {
       found_items: newlyFound,
       found: newlyFound[0] || null,
       olympiad,
-      multitask,
       found_main: completeResult.found_main,
       required_main_answers: completeResult.required_main_answers
     });
@@ -1240,6 +1328,80 @@ router.post("/:pin/answer", async (req, res) => {
 });
 
 
+
+
+router.post("/:pin/hint/:hintId/purchase", async (req, res) => {
+  const pin = String(req.params.pin || "").trim().toUpperCase();
+  const hintId = Number(req.params.hintId);
+
+  if (!Number.isInteger(hintId) || hintId < 1) {
+    return res.status(400).json({ error: "Невірна підказка" });
+  }
+
+  try {
+    const gameData = await new Promise((resolve, reject) => {
+      getGameDataByPin(pin, (error, data) => error ? reject(error) : resolve(data));
+    });
+
+    if (!gameData) return res.status(404).json({ error: "Команду не знайдено" });
+    if (gameData.run_status === "ARCHIVED") return res.status(403).json({ error: "Цей запуск уже в архіві" });
+
+    const task = await new Promise((resolve, reject) => {
+      getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => error ? reject(error) : resolve(currentTask));
+    });
+
+    if (!task) return res.status(404).json({ error: "Команда вже завершила гру" });
+
+    const hint = await dbGet(`SELECT * FROM task_hints WHERE id = ? AND task_id = ?`, [hintId, task.id]);
+    if (!hint) return res.status(404).json({ error: "Підказку не знайдено" });
+    if (hint.hint_type !== "PAID") return res.status(400).json({ error: "Ця підказка не є платною" });
+
+    const elapsedSeconds = (() => {
+      if (!task.opened_at) return 0;
+      const openedDate = parseUtcDate(task.opened_at);
+      if (!openedDate || Number.isNaN(openedDate.getTime())) return 0;
+      return Math.floor((Date.now() - openedDate.getTime()) / 1000);
+    })();
+
+    if (elapsedSeconds < (Number(hint.purchase_after_seconds) || 0)) {
+      return res.status(403).json({ error: "Купівля підказки ще недоступна" });
+    }
+
+    const existing = await dbGet(
+      `SELECT id FROM team_hint_purchases WHERE team_id = ? AND task_hint_id = ?`,
+      [gameData.team_id, hint.id]
+    );
+
+    if (!existing) {
+      await dbRun(`INSERT INTO team_hint_purchases (team_id, task_hint_id) VALUES (?, ?)`, [gameData.team_id, hint.id]);
+      const value = Math.max(0, Number(hint.purchase_value) || 0);
+      if (value > 0) {
+        if (isScoreModeValue(gameData.winner_type)) {
+          await addScoreEvent({
+            teamId: gameData.team_id,
+            taskId: task.id,
+            eventType: "HINT_PURCHASE",
+            points: -value,
+            comment: `Купівля підказки №${hint.sort_order}`
+          });
+        } else {
+          await dbRun(
+            `INSERT INTO team_time_adjustments (team_id, task_id, adjustment_type, seconds, comment) VALUES (?, ?, 'MANUAL_PENALTY', ?, ?)`,
+            [gameData.team_id, task.id, value, `Купівля підказки №${hint.sort_order}`]
+          );
+        }
+      }
+    }
+
+    const hints = await new Promise((resolve, reject) => {
+      getTaskHints(task.id, gameData.team_id, (error, rows) => error ? reject(error) : resolve(rows));
+    });
+
+    res.json({ message: "Підказку куплено", hints });
+  } catch (error) {
+    res.status(500).json({ error: "Помилка купівлі підказки" });
+  }
+});
 
 router.post("/:pin/multitask/subtask/:subtaskId/hint/purchase", async (req, res) => {
   const pin = String(req.params.pin || "").trim().toUpperCase();
@@ -1296,15 +1458,25 @@ router.post("/:pin/multitask/subtask/:subtaskId/hint/purchase", async (req, res)
 
       const purchaseValue = Math.max(0, Number(subtask.hint_purchase_value || 0));
       if (purchaseValue > 0) {
-        await dbRun(
-          `UPDATE team_tasks SET penalty_seconds = penalty_seconds + ? WHERE team_id = ? AND task_id = ?`,
-          [purchaseValue, gameData.team_id, task.id]
-        );
+        if (isScoreModeValue(gameData.winner_type)) {
+          await addScoreEvent({
+            teamId: gameData.team_id,
+            taskId: task.id,
+            eventType: "HINT_PURCHASE",
+            points: -purchaseValue,
+            comment: `Купівля підказки Multitask №${subtask.sort_order}`
+          });
+        } else {
+          await dbRun(
+            `UPDATE team_tasks SET penalty_seconds = penalty_seconds + ? WHERE team_id = ? AND task_id = ?`,
+            [purchaseValue, gameData.team_id, task.id]
+          );
 
-        await dbRun(
-          `INSERT INTO team_time_adjustments (team_id, task_id, adjustment_type, seconds, comment) VALUES (?, ?, 'MANUAL_PENALTY', ?, ?)`,
-          [gameData.team_id, task.id, purchaseValue, `Купівля підказки Multitask №${subtask.sort_order}`]
-        );
+          await dbRun(
+            `INSERT INTO team_time_adjustments (team_id, task_id, adjustment_type, seconds, comment) VALUES (?, ?, 'MANUAL_PENALTY', ?, ?)`,
+            [gameData.team_id, task.id, purchaseValue, `Купівля підказки Multitask №${subtask.sort_order}`]
+          );
+        }
       }
     }
 
@@ -1384,29 +1556,39 @@ router.post("/:pin/olympiad/cell/:cellNumber/purchase", async (req, res) => {
 
     const purchaseValue = Math.max(0, Number(cell.purchase_value || 0));
     if (purchaseValue > 0) {
-      await dbRun(
-        `
-        UPDATE team_tasks
-        SET penalty_seconds = penalty_seconds + ?
-        WHERE team_id = ? AND task_id = ?
-        `,
-        [purchaseValue, gameData.team_id, task.id]
-      );
+      if (isScoreModeValue(gameData.winner_type)) {
+        await addScoreEvent({
+          teamId: gameData.team_id,
+          taskId: task.id,
+          eventType: "OLYMPIAD_PURCHASE",
+          points: -purchaseValue,
+          comment: `Купівля коду олімпійки №${cell.cell_number}: ${cell.answer_text || ""}`
+        });
+      } else {
+        await dbRun(
+          `
+          UPDATE team_tasks
+          SET penalty_seconds = penalty_seconds + ?
+          WHERE team_id = ? AND task_id = ?
+          `,
+          [purchaseValue, gameData.team_id, task.id]
+        );
 
-      await dbRun(
-        `
-        INSERT INTO team_time_adjustments (
-          team_id, task_id, adjustment_type, seconds, comment
-        )
-        VALUES (?, ?, 'MANUAL_PENALTY', ?, ?)
-        `,
-        [
-          gameData.team_id,
-          task.id,
-          purchaseValue,
-          `Купівля коду олімпійки №${cell.cell_number}: ${cell.answer_text || ""}`
-        ]
-      );
+        await dbRun(
+          `
+          INSERT INTO team_time_adjustments (
+            team_id, task_id, adjustment_type, seconds, comment
+          )
+          VALUES (?, ?, 'PENALTY_CODE', ?, ?)
+          `,
+          [
+            gameData.team_id,
+            task.id,
+            purchaseValue,
+            `Купівля коду олімпійки №${cell.cell_number}: ${cell.answer_text || ""}`
+          ]
+        );
+      }
     }
 
     const completeResult = await checkOlympiadCompletion(gameData.team_id, task);
@@ -1434,7 +1616,6 @@ router.post("/:pin/olympiad/cell/:cellNumber/purchase", async (req, res) => {
       task_completed: completeResult.completed,
       has_next_task: nextExists,
       olympiad,
-      multitask,
       found_main: completeResult.found_main,
       required_main_answers: completeResult.required_main_answers
     });
@@ -1583,33 +1764,47 @@ router.post("/:pin/auto-transition", (req, res) => {
               };
 
               if (autoPenalty > 0) {
-                db.run(
-                  `
-                  INSERT INTO team_time_adjustments (
-                    team_id,
-                    task_id,
-                    adjustment_type,
-                    seconds,
-                    comment
-                  )
-                  VALUES (?, ?, 'AUTO_TRANSITION', ?, ?)
-                  `,
-                  [
-                    gameData.team_id,
-                    task.id,
-                    autoPenalty,
-                    "Штраф за автоперехід"
-                  ],
-                  adjustmentError => {
-                    if (adjustmentError) {
-                      return res.status(500).json({
-                        error: "Помилка збереження штрафу автопереходу"
-                      });
-                    }
+                if (isScoreModeValue(gameData.winner_type)) {
+                  addScoreEvent({
+                    teamId: gameData.team_id,
+                    taskId: task.id,
+                    eventType: "AUTO_TRANSITION",
+                    points: -autoPenalty,
+                    comment: "Штраф за автоперехід"
+                  })
+                    .then(continueAfterAdjustment)
+                    .catch(() => res.status(500).json({
+                      error: "Помилка збереження штрафу автопереходу"
+                    }));
+                } else {
+                  db.run(
+                    `
+                    INSERT INTO team_time_adjustments (
+                      team_id,
+                      task_id,
+                      adjustment_type,
+                      seconds,
+                      comment
+                    )
+                    VALUES (?, ?, 'AUTO_TRANSITION', ?, ?)
+                    `,
+                    [
+                      gameData.team_id,
+                      task.id,
+                      autoPenalty,
+                      "Штраф за автоперехід"
+                    ],
+                    adjustmentError => {
+                      if (adjustmentError) {
+                        return res.status(500).json({
+                          error: "Помилка збереження штрафу автопереходу"
+                        });
+                      }
 
-                    continueAfterAdjustment();
-                  }
-                );
+                      continueAfterAdjustment();
+                    }
+                  );
+                }
               } else {
                 continueAfterAdjustment();
               }

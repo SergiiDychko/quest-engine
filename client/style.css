@@ -1952,14 +1952,18 @@ th.selected-stat-column-cell {
   max-height: 100px;
   overflow: hidden;
   position: relative;
-  cursor: zoom-in;
+  cursor: default;
   border-radius: 8px;
   background: transparent;
   line-height: 0;
   transition: box-shadow .15s ease, transform .15s ease, background .15s ease;
 }
 
-.olympiad-scaled-preview:hover {
+.olympiad-scaled-preview.is-clickable {
+  cursor: zoom-in;
+}
+
+.olympiad-scaled-preview.is-clickable:hover {
   background: #eef2ff;
   box-shadow: 0 8px 22px rgba(15, 23, 42, .18);
   transform: translateY(-1px);
@@ -2200,4 +2204,52 @@ th.selected-stat-column-cell {
 
 .multitask-settings-block .multitask-setting-row {
   align-items: center;
+}
+
+.task-score-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+
+.task-score-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.task-score-row input {
+  width: 110px;
+}
+
+.standard-hint-card label {
+  display: block;
+  margin: 10px 0;
+}
+
+/* Patch: keep Olympiad previews compact without cropping */
+.olympiad-scaled-preview-inner img,
+.olympiad-scaled-preview-inner video {
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+}
+
+/* Patch: preview page should match player width */
+.preview-layout {
+  max-width: 900px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Final SCORE/POINTS polish fixes */
+.task-score-row.hidden {
+  display: none !important;
+}
+.standard-hint-card [data-standard-timed-field].hidden,
+.standard-hint-card [data-standard-paid-field].hidden,
+.standard-hint-card label.hidden {
+  display: none !important;
 }

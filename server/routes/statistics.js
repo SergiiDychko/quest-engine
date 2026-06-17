@@ -46,6 +46,22 @@ function dbRun(sql, params = []) {
   });
 }
 
+function isScoreModeValue(value) {
+  const type = String(value || "TIME").toUpperCase();
+  return type === "SCORE" || type === "POINTS";
+}
+
+async function getTeamWinnerType(teamId) {
+  const row = await dbGet(`
+    SELECT games.winner_type
+    FROM teams
+    JOIN game_runs ON game_runs.id = teams.run_id
+    JOIN games ON games.id = game_runs.game_id
+    WHERE teams.id = ?
+  `, [teamId]);
+  return row ? row.winner_type : "TIME";
+}
+
 function toDate(value) {
   if (!value) {
     return null;
@@ -548,7 +564,8 @@ async function getRunById(runId) {
       game_runs.status,
       game_runs.started_at,
       game_runs.finished_at,
-      games.title AS game_title
+      games.title AS game_title,
+      games.winner_type
     FROM game_runs
     JOIN games ON games.id = game_runs.game_id
     WHERE game_runs.id = ?
@@ -568,7 +585,8 @@ async function getRunByCode(runCode) {
       game_runs.status,
       game_runs.started_at,
       game_runs.finished_at,
-      games.title AS game_title
+      games.title AS game_title,
+      games.winner_type
     FROM game_runs
     JOIN games ON games.id = game_runs.game_id
     WHERE game_runs.run_code = ?
@@ -599,6 +617,7 @@ async function buildStatisticsForRun(run) {
         tasks.id,
         tasks.title,
         tasks.sort_order,
+        tasks.score_points,
 
         team_tasks.opened_at,
         team_tasks.completed_at,
@@ -655,6 +674,32 @@ async function buildStatisticsForRun(run) {
       [team.id]
     );
 
+    team.score_events = await dbAll(
+      `
+      SELECT
+        team_score_events.id,
+        team_score_events.team_id,
+        team_score_events.task_id,
+        team_score_events.event_type,
+        team_score_events.points,
+        team_score_events.comment,
+        team_score_events.created_at,
+        tasks.title AS task_title,
+        tasks.sort_order AS task_sort_order
+      FROM team_score_events
+      LEFT JOIN tasks
+        ON tasks.id = team_score_events.task_id
+      WHERE team_score_events.team_id = ?
+      ORDER BY team_score_events.created_at ASC, team_score_events.id ASC
+      `,
+      [team.id]
+    );
+
+    team.score_total = team.score_events.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
+    team.score_reached_at = team.score_events.length
+      ? team.score_events[team.score_events.length - 1].created_at
+      : null;
+
     team.total_bonus_seconds =
       calculateBonusSeconds(team.adjustments);
 
@@ -708,6 +753,7 @@ async function buildStatisticsForRun(run) {
       game_id: run.game_id,
       title: run.title,
       game_title: run.game_title,
+      winner_type: run.winner_type || "TIME",
       run_code: run.run_code,
       status: run.status,
       started_at: run.started_at,
@@ -903,6 +949,25 @@ router.get(
         ]
       );
 
+      const scoreEvents = await dbAll(
+        `
+        SELECT
+          team_score_events.id,
+          team_score_events.event_type,
+          team_score_events.points,
+          team_score_events.comment,
+          team_score_events.created_at
+        FROM team_score_events
+        WHERE team_score_events.team_id = ?
+          AND team_score_events.task_id = ?
+        ORDER BY created_at ASC, id ASC
+        `,
+        [
+          teamId,
+          taskId
+        ]
+      );
+
       const adjustments = await dbAll(
         `
         SELECT
@@ -930,7 +995,8 @@ router.get(
         answers,
         found_answers: foundAnswers,
         answer_log: answerLog,
-        adjustments
+        adjustments,
+        score_events: scoreEvents
       });
 
     } catch (error) {
@@ -997,35 +1063,42 @@ router.post(
     }
 
     try {
-      await new Promise((resolve, reject) => {
-        db.run(
-          `
-          INSERT INTO team_time_adjustments (
-            team_id,
-            task_id,
-            adjustment_type,
-            seconds,
-            comment
-          )
-          VALUES (
-            ?,
-            NULL,
-            'MANUAL_BONUS',
-            ?,
-            ?
-          )
-          `,
-          [
-            teamId,
-            seconds,
-            comment
-          ],
-          error => {
-            if (error) reject(error);
-            else resolve();
-          }
+      if (isScoreModeValue(await getTeamWinnerType(teamId))) {
+        await dbRun(
+          `INSERT INTO team_score_events (team_id, task_id, event_type, points, comment) VALUES (?, NULL, 'MANUAL_BONUS', ?, ?)`,
+          [teamId, seconds, comment]
         );
-      });
+      } else {
+        await new Promise((resolve, reject) => {
+          db.run(
+            `
+            INSERT INTO team_time_adjustments (
+              team_id,
+              task_id,
+              adjustment_type,
+              seconds,
+              comment
+            )
+            VALUES (
+              ?,
+              NULL,
+              'MANUAL_BONUS',
+              ?,
+              ?
+            )
+            `,
+            [
+              teamId,
+              seconds,
+              comment
+            ],
+            error => {
+              if (error) reject(error);
+              else resolve();
+            }
+          );
+        });
+      }
 
       res.json({
         message: "Бонус додано"
@@ -1061,35 +1134,42 @@ router.post(
     }
 
     try {
-      await new Promise((resolve, reject) => {
-        db.run(
-          `
-          INSERT INTO team_time_adjustments (
-            team_id,
-            task_id,
-            adjustment_type,
-            seconds,
-            comment
-          )
-          VALUES (
-            ?,
-            NULL,
-            'MANUAL_PENALTY',
-            ?,
-            ?
-          )
-          `,
-          [
-            teamId,
-            seconds,
-            comment
-          ],
-          error => {
-            if (error) reject(error);
-            else resolve();
-          }
+      if (isScoreModeValue(await getTeamWinnerType(teamId))) {
+        await dbRun(
+          `INSERT INTO team_score_events (team_id, task_id, event_type, points, comment) VALUES (?, NULL, 'MANUAL_PENALTY', ?, ?)`,
+          [teamId, -seconds, comment]
         );
-      });
+      } else {
+        await new Promise((resolve, reject) => {
+          db.run(
+            `
+            INSERT INTO team_time_adjustments (
+              team_id,
+              task_id,
+              adjustment_type,
+              seconds,
+              comment
+            )
+            VALUES (
+              ?,
+              NULL,
+              'MANUAL_PENALTY',
+              ?,
+              ?
+            )
+            `,
+            [
+              teamId,
+              seconds,
+              comment
+            ],
+            error => {
+              if (error) reject(error);
+              else resolve();
+            }
+          );
+        });
+      }
 
       res.json({
         message: "Штраф додано"

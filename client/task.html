@@ -57,6 +57,14 @@
 
   </div>
 
+  <div id="taskScoreRow" class="task-score-row hidden">
+    <label>
+      Нарахувати за виконання завдання
+      <input id="taskScorePointsInput" type="number" min="0" value="0">
+      балів
+    </label>
+  </div>
+
   <div class="task-actions-row">
 
     <button
@@ -135,7 +143,7 @@
         </label>
 
         <label class="auto-row">
-          <span>Призначити штраф за автоперехід (секунди)</span>
+          <span id="autoTransitionPenaltyLabel">Призначити штраф за автоперехід</span>
           <input id="autoTransitionPenalty" type="number" min="0" value="0" />
         </label>
 
@@ -154,6 +162,7 @@ const params = new URLSearchParams(window.location.search);
 const taskId = params.get("id");
 const gameId = params.get("game");
 
+let currentGame = null;
 let currentTask = null;
 let currentAnswers = [];
 let currentHints = [];
@@ -161,6 +170,11 @@ let currentOlympiad = null;
 let currentMultitask = null;
 let multitaskContentEditor = null;
 let multitaskEditingSubtaskId = null;
+
+function isScoreModeValue(value) {
+  const type = String(value || "TIME").toUpperCase();
+  return type === "SCORE" || type === "POINTS";
+}
 
 document.querySelectorAll(".tab-btn").forEach(button => {
   button.addEventListener("click", () => {
@@ -219,6 +233,14 @@ async function loadTask() {
     return;
   }
 
+  if (!currentGame && gameId) {
+    try {
+      const gameResponse = await fetch(`/api/games/${gameId}`);
+      const gameResult = await gameResponse.json();
+      if (gameResponse.ok) currentGame = gameResult.game;
+    } catch (error) {}
+  }
+
   currentTask = result.task;
   currentAnswers = result.answers;
 
@@ -230,6 +252,14 @@ document.getElementById("taskNameInput").value =
 
 document.getElementById("taskTypeSelect").value =
   currentTask.task_type || "STANDARD";
+
+  document.getElementById("taskScorePointsInput").value =
+    Number(currentTask.score_points) || 0;
+
+  document.getElementById("taskScoreRow").classList.toggle(
+    "hidden",
+    !isScoreModeValue(currentGame?.winner_type)
+  );
 
   updateTaskEditorMode();
 
@@ -247,7 +277,8 @@ async function saveTaskHeader(options = {}) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       title,
-      task_type: document.getElementById("taskTypeSelect").value
+      task_type: document.getElementById("taskTypeSelect").value,
+      score_points: isScoreModeValue(currentGame?.winner_type) ? (document.getElementById("taskScorePointsInput")?.value || 0) : 0
     })
   });
 
@@ -297,6 +328,7 @@ document
             document.getElementById("taskNameInput").value.trim(),
           task_type:
             document.getElementById("taskTypeSelect").value,
+          score_points: isScoreModeValue(currentGame?.winner_type) ? (document.getElementById("taskScorePointsInput")?.value || 0) : 0,
           hide_answers_block:
             ["OLYMPIAD", "MULTITASK"].includes(document.getElementById("taskTypeSelect").value)
         })
@@ -425,11 +457,13 @@ function openTaskPreviewDocument(title, bodyHtml) {
   <script src="content-renderer.js"><\/script>
 </head>
 <body>
-  <main class="app">
-    <div class="card">
+  <main class="game-layout preview-layout">
+    <section class="card task-card">
       <h1>${escapeHtml(title)}</h1>
-      ${bodyHtml}
-    </div>
+      <div class="task-content">
+        ${bodyHtml}
+      </div>
+    </section>
   </main>
   <script>
     window.addEventListener("load", function () {
@@ -503,25 +537,67 @@ async function loadHints() {
     return;
   }
 
-  hintsList.innerHTML = currentHints.map(hint => `
-    <div class="info-block">
+  const valueLabel = isScoreModeValue(currentGame?.winner_type)
+    ? "Купити за, балів"
+    : "Купити за, сек";
+
+  hintsList.innerHTML = currentHints.map(hint => {
+    let type = String(hint.hint_type || "TIMED").toUpperCase();
+    if (type === "NONE") type = "TIMED";
+    return `
+    <div class="info-block standard-hint-card" data-standard-hint="${hint.id}">
       <p><strong>Підказка №${hint.sort_order}</strong></p>
 
       <label>
-        Через (секунд):
-        <input
-          type="number"
-          id="hint-seconds-${hint.id}"
-          value="${hint.show_after_seconds}"
-        >
+        Тип підказки
+        <select id="hint-type-${hint.id}" data-standard-hint-type>
+          <option value="TIMED" ${type === "TIMED" ? "selected" : ""}>Підказка за часом</option>
+          <option value="PAID" ${type === "PAID" ? "selected" : ""}>Платна підказка</option>
+        </select>
       </label>
 
-      <textarea id="hint-content-${hint.id}" rows="4">${escapeHtml(hint.content || "")}</textarea>
+      <div id="hint-fields-${hint.id}" data-standard-hint-fields>
+        <label>
+          Текст підказки
+          <textarea id="hint-content-${hint.id}" rows="4">${escapeHtml(hint.content || "")}</textarea>
+        </label>
+
+        <label data-standard-timed-field>
+          Показати через, сек
+          <input type="number" id="hint-seconds-${hint.id}" value="${Number(hint.show_after_seconds) || 0}">
+        </label>
+
+        <label data-standard-paid-field>
+          Кнопка купівлі через, сек
+          <input type="number" id="hint-purchase-after-${hint.id}" value="${Number(hint.purchase_after_seconds) || 0}">
+        </label>
+
+        <label data-standard-paid-field>
+          ${valueLabel}
+          <input type="number" id="hint-purchase-value-${hint.id}" value="${Number(hint.purchase_value) || 0}">
+        </label>
+      </div>
 
       <button onclick="saveHint(${hint.id})">Зберегти підказку</button>
       <button onclick="deleteHint(${hint.id})">Видалити підказку</button>
     </div>
-  `).join("");
+  `;
+  }).join("");
+
+  hintsList.querySelectorAll('[data-standard-hint]').forEach(card => {
+    const select = card.querySelector('[data-standard-hint-type]');
+    const update = () => updateStandardHintFields(card);
+    select?.addEventListener('change', update);
+    update();
+  });
+}
+
+function updateStandardHintFields(card) {
+  const type = card.querySelector('[data-standard-hint-type]')?.value || "TIMED";
+  const fields = card.querySelector('[data-standard-hint-fields]');
+  if (fields) fields.classList.remove("hidden");
+  card.querySelectorAll('[data-standard-timed-field]').forEach(item => item.classList.toggle("hidden", type !== "TIMED"));
+  card.querySelectorAll('[data-standard-paid-field]').forEach(item => item.classList.toggle("hidden", type !== "PAID"));
 }
 
 async function addHint() {
@@ -538,17 +614,20 @@ async function addHint() {
 }
 
 async function saveHint(hintId) {
-  const show_after_seconds =
-    document.getElementById(`hint-seconds-${hintId}`).value;
-
-  const content =
-    document.getElementById(`hint-content-${hintId}`).value;
+  const hint_type = document.getElementById(`hint-type-${hintId}`)?.value || "TIMED";
+  const show_after_seconds = document.getElementById(`hint-seconds-${hintId}`)?.value || 0;
+  const purchase_after_seconds = document.getElementById(`hint-purchase-after-${hintId}`)?.value || 0;
+  const purchase_value = document.getElementById(`hint-purchase-value-${hintId}`)?.value || 0;
+  const content = document.getElementById(`hint-content-${hintId}`)?.value || "";
 
   const response = await fetch(`/api/task-hints/${hintId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      hint_type,
       show_after_seconds,
+      purchase_after_seconds,
+      purchase_value,
       content
     })
   });
@@ -587,6 +666,8 @@ function renderAutoTransition() {
     enabled ? currentTask.auto_transition_minutes : 30;
   document.getElementById("autoTransitionPenalty").value =
     currentTask.auto_transition_penalty_seconds || 0;
+  const autoPenaltyLabel = document.getElementById("autoTransitionPenaltyLabel");
+  if (autoPenaltyLabel) autoPenaltyLabel.textContent = isScoreModeValue(currentGame?.winner_type) ? "Призначити штраф за автоперехід (бали)" : "Призначити штраф за автоперехід (секунди)";
 }
 
 
@@ -731,7 +812,7 @@ function renderOlympiadEditor() {
               <th>Рівень</th>
               <th>Питання / вміст клітинки</th>
               <th>Відповідь</th>
-              <th>Купівля</th>
+              <th>${isScoreModeValue(currentGame?.winner_type) ? "Купівля, балів" : "Купівля, сек"}</th>
             </tr>
           </thead>
           <tbody>
@@ -1152,7 +1233,7 @@ function renderMultitaskSubtaskEditor(subtask, index) {
             <input data-field="hint_purchase_after_seconds" type="number" min="0" value="${Number(subtask.hint_purchase_after_seconds) || 0}">
           </label>
           <label data-hint-paid-field>
-            <span>Купити за, сек</span>
+            <span>${isScoreModeValue(currentGame?.winner_type) ? "Купити за, балів" : "Купити за, сек"}</span>
             <input data-field="hint_purchase_value" type="number" min="0" value="${Number(subtask.hint_purchase_value) || 0}">
           </label>
         </div>
@@ -1479,6 +1560,11 @@ function codeTypeLabel(type) {
 }
 
 function renderCodeTable(title, answers, showSeconds) {
+  const isScoreMode = isScoreModeValue(currentGame?.winner_type);
+  const valueColumnTitle = isScoreMode ? "Бали" : "Секунди";
+  const valueColumnHelp = isScoreMode
+    ? "Для бонусів і штрафів вкажіть значення в балах"
+    : "Для бонусів і штрафів вкажіть значення в секундах";
   if (!answers.length) return "";
 
   return `
@@ -1492,7 +1578,7 @@ function renderCodeTable(title, answers, showSeconds) {
             <th>Значення <button class="help-btn" title="Тут введіть правильну відповідь">?</button></th>
             <th>Опис <button class="help-btn" title="Наприклад: одне слово, кирилиця">?</button></th>
             <th>Коментар <button class="help-btn" title="Зʼявиться після здачі коду">?</button></th>
-            ${showSeconds ? `<th>Секунди <button class="help-btn" title="Для бонусів і штрафів вкажіть значення в секундах">?</button></th>` : ""}
+            ${showSeconds ? `<th>${valueColumnTitle} <button class="help-btn" title="${valueColumnHelp}">?</button></th>` : ""}
             <th class="delete-column"></th>
           </tr>
         </thead>

@@ -124,7 +124,7 @@ router.get("/:id", requireAuth, (req, res) => {
 
 router.put("/:id", requireAuth, (req, res) => {
   const taskId = req.params.id;
-  const { title, task_type, hide_answers_block } = req.body;
+  const { title, task_type, hide_answers_block, score_points } = req.body;
 
   if (task_type && !["STANDARD", "OLYMPIAD", "MULTITASK"].includes(task_type)) {
     return res.status(400).json({
@@ -141,6 +141,7 @@ router.put("/:id", requireAuth, (req, res) => {
       title = ?,
       task_type = COALESCE(?, task_type),
       hide_answers_block = CASE WHEN ? THEN ? ELSE hide_answers_block END,
+      score_points = CASE WHEN ? THEN ? ELSE score_points END,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
     `,
@@ -149,6 +150,8 @@ router.put("/:id", requireAuth, (req, res) => {
       task_type || null,
       hasHideAnswers ? 1 : 0,
       hide_answers_block ? 1 : 0,
+      Object.prototype.hasOwnProperty.call(req.body, "score_points") ? 1 : 0,
+      Math.max(0, Number(score_points) || 0),
       taskId
     ],
     function(error) {
@@ -252,7 +255,7 @@ router.put("/:id/olympiad", requireAuth, async (req, res) => {
 
   const duplicate = findDuplicateCodes(
     meta.map(item => ({
-      label: String(item.cell_number),
+      label: `Клітинка олімпійки №${item.cell_number}`,
       value: cellByNumberForValidation.get(item.cell_number)?.answer_text || ""
     }))
   );
@@ -402,6 +405,7 @@ router.delete("/:id", requireAuth, (req, res) => {
           [taskId]
         );
 
+        db.run(`DELETE FROM team_score_events WHERE task_id = ?`, [taskId]);
         db.run(`DELETE FROM team_answers WHERE task_id = ?`, [taskId]);
         db.run(`DELETE FROM team_tasks WHERE task_id = ?`, [taskId]);
         db.run(`DELETE FROM task_answers WHERE task_id = ?`, [taskId]);

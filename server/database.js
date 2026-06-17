@@ -325,6 +325,38 @@ db.run(`
   `);
 
   // Lightweight migrations for newer task mechanics.
+
+  db.run(`ALTER TABLE tasks ADD COLUMN score_points INTEGER NOT NULL DEFAULT 0`, () => {});
+  db.run(`ALTER TABLE task_hints ADD COLUMN hint_type TEXT NOT NULL DEFAULT 'TIMED'`, () => {});
+  db.run(`ALTER TABLE task_hints ADD COLUMN purchase_after_seconds INTEGER NOT NULL DEFAULT 0`, () => {});
+  db.run(`ALTER TABLE task_hints ADD COLUMN purchase_value INTEGER NOT NULL DEFAULT 0`, () => {});
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS team_hint_purchases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      team_id INTEGER NOT NULL,
+      task_hint_id INTEGER NOT NULL,
+      purchased_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(team_id, task_hint_id),
+      FOREIGN KEY (team_id) REFERENCES teams(id),
+      FOREIGN KEY (task_hint_id) REFERENCES task_hints(id)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS team_score_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      team_id INTEGER NOT NULL,
+      task_id INTEGER,
+      event_type TEXT NOT NULL,
+      points INTEGER NOT NULL,
+      comment TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (team_id) REFERENCES teams(id),
+      FOREIGN KEY (task_id) REFERENCES tasks(id)
+    )
+  `);
+
   db.run(`ALTER TABLE tasks ADD COLUMN hide_answers_block INTEGER NOT NULL DEFAULT 0`, () => {});
   db.run(`ALTER TABLE olympiad_settings ADD COLUMN purchase_available_after_seconds INTEGER NOT NULL DEFAULT 0`, () => {});
   db.run(`ALTER TABLE olympiad_cells ADD COLUMN purchase_value INTEGER NOT NULL DEFAULT 0`, () => {});
