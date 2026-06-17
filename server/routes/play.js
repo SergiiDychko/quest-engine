@@ -52,6 +52,175 @@ function dbRun(sql, params = []) {
 }
 
 
+
+function generateOlympiadCellsMeta(associationCount, levelCount) {
+  const x = Number(associationCount);
+  const l = Number(levelCount);
+  const cells = [];
+  let cellNumber = 1;
+
+  for (let level = l; level >= 1; level--) {
+    const count = Math.pow(x, level - 1);
+    for (let index = 0; index < count; index++) {
+      cells.push({
+        cell_number: cellNumber,
+        level_number: level,
+        index_in_level: index
+      });
+      cellNumber += 1;
+    }
+  }
+
+  return cells;
+}
+
+async function getOlympiadPayload(teamId, taskId) {
+  const settings = await dbGet(
+    `SELECT * FROM olympiad_settings WHERE task_id = ?`,
+    [taskId]
+  );
+
+  if (!settings) {
+    return null;
+  }
+
+  const cells = await dbAll(
+    `
+    SELECT
+      olympiad_cells.id,
+      olympiad_cells.task_id,
+      olympiad_cells.cell_number,
+      olympiad_cells.level_number,
+      olympiad_cells.content,
+      olympiad_cells.answer_text,
+      olympiad_cells.comment,
+      olympiad_cells.purchase_value,
+      olympiad_cells.task_answer_id,
+      team_found_answers.found_at
+    FROM olympiad_cells
+    LEFT JOIN team_found_answers
+      ON team_found_answers.task_answer_id = olympiad_cells.task_answer_id
+      AND team_found_answers.team_id = ?
+    WHERE olympiad_cells.task_id = ?
+    ORDER BY olympiad_cells.cell_number ASC
+    `,
+    [teamId, taskId]
+  );
+
+  return {
+    settings,
+    cells: cells.map(cell => ({
+      id: cell.id,
+      cell_number: cell.cell_number,
+      level_number: cell.level_number,
+      content: cell.content || "",
+      answer_text: cell.found_at ? cell.answer_text : "",
+      purchase_value: cell.purchase_value || 0,
+      is_found: Boolean(cell.found_at),
+      task_answer_id: cell.task_answer_id
+    }))
+  };
+}
+
+async function checkOlympiadCompletion(teamId, task) {
+  const settings = await dbGet(
+    `SELECT * FROM olympiad_settings WHERE task_id = ?`,
+    [task.id]
+  );
+
+  if (!settings) {
+    return {
+      completed: false,
+      found_main: 0,
+      required_main_answers: 0
+    };
+  }
+
+  const foundRow = await dbGet(
+    `
+    SELECT COUNT(*) AS found_count
+    FROM team_found_answers
+    JOIN olympiad_cells
+      ON olympiad_cells.task_answer_id = team_found_answers.task_answer_id
+    WHERE team_found_answers.team_id = ?
+      AND olympiad_cells.task_id = ?
+    `,
+    [teamId, task.id]
+  );
+
+  const totalRow = await dbGet(
+    `SELECT COUNT(*) AS total_count, MAX(cell_number) AS top_cell FROM olympiad_cells WHERE task_id = ?`,
+    [task.id]
+  );
+
+  const foundCount = foundRow?.found_count || 0;
+  const totalCount = totalRow?.total_count || 0;
+  const topCellNumber = totalRow?.top_cell || 0;
+
+  let completed = false;
+  let required = totalCount;
+
+  if (settings.completion_type === "ALL") {
+    completed = totalCount > 0 && foundCount >= totalCount;
+    required = totalCount;
+  } else if (settings.completion_type === "COUNT") {
+    required = Number(settings.required_cells_count) || totalCount;
+    completed = foundCount >= required;
+  } else {
+    const topFound = await dbGet(
+      `
+      SELECT team_found_answers.id
+      FROM team_found_answers
+      JOIN olympiad_cells
+        ON olympiad_cells.task_answer_id = team_found_answers.task_answer_id
+      WHERE team_found_answers.team_id = ?
+        AND olympiad_cells.task_id = ?
+        AND olympiad_cells.cell_number = ?
+      `,
+      [teamId, task.id, topCellNumber]
+    );
+
+    completed = Boolean(topFound);
+    required = 1;
+  }
+
+  if (!completed) {
+    return {
+      completed: false,
+      found_main: foundCount,
+      required_main_answers: required
+    };
+  }
+
+  const timeRow = await dbGet(`SELECT CURRENT_TIMESTAMP AS completed_at`);
+  const completedAt = timeRow.completed_at;
+
+  await dbRun(
+    `
+    UPDATE team_tasks
+    SET completed_at = ?
+    WHERE team_id = ?
+      AND task_id = ?
+      AND completed_at IS NULL
+    `,
+    [completedAt, teamId, task.id]
+  );
+
+  await new Promise((resolve, reject) => {
+    openNextTaskAt(teamId, task.game_id, task.sort_order, completedAt, error => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+
+  return {
+    completed: true,
+    completed_at: completedAt,
+    found_main: foundCount,
+    required_main_answers: required
+  };
+}
+
 function defaultGamePage(pageType) {
   if (pageType === "START") {
     return {
@@ -562,14 +731,23 @@ router.get("/:pin", (req, res) => {
                   });
                 }
 
-                res.json({
-                  status: "READY",
-                  game: gameData,
-                  task,
-                  content,
-                  hints,
-                  answers,
-                  found_answers: foundAnswers
+                Promise.resolve(
+                  task.task_type === "OLYMPIAD"
+                    ? getOlympiadPayload(gameData.team_id, task.id)
+                    : null
+                ).then(olympiad => {
+                  res.json({
+                    status: "READY",
+                    game: gameData,
+                    task,
+                    content,
+                    hints,
+                    answers: task.hide_answers_block ? [] : answers,
+                    found_answers: foundAnswers,
+                    olympiad
+                  });
+                }).catch(() => {
+                  res.status(500).json({ error: "Помилка завантаження олімпійки" });
                 });
               }
             );
@@ -942,12 +1120,16 @@ router.post("/:pin/answer", async (req, res) => {
     let nextExists = false;
 
     if (hasNewMainAnswer) {
-      completeResult = await new Promise((resolve, reject) => {
-        completeTaskIfNeeded(gameData.team_id, task, (error, result) => {
-          if (error) reject(error);
-          else resolve(result);
+      if (task.task_type === "OLYMPIAD") {
+        completeResult = await checkOlympiadCompletion(gameData.team_id, task);
+      } else {
+        completeResult = await new Promise((resolve, reject) => {
+          completeTaskIfNeeded(gameData.team_id, task, (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          });
         });
-      });
+      }
 
       if (completeResult.completed) {
         nextExists = await new Promise((resolve, reject) => {
@@ -974,6 +1156,10 @@ router.post("/:pin/answer", async (req, res) => {
     const acceptedCount = results.filter(item => item.status === "accepted").length;
     const repeatedCount = results.filter(item => item.status === "repeated").length;
 
+    const olympiad = task.task_type === "OLYMPIAD"
+      ? await getOlympiadPayload(gameData.team_id, task.id)
+      : null;
+
     return res.json({
       accepted: acceptedCount > 0 || repeatedCount > 0,
       repeated: acceptedCount === 0 && repeatedCount > 0,
@@ -983,6 +1169,7 @@ router.post("/:pin/answer", async (req, res) => {
       results,
       found_items: newlyFound,
       found: newlyFound[0] || null,
+      olympiad,
       found_main: completeResult.found_main,
       required_main_answers: completeResult.required_main_answers
     });
@@ -991,6 +1178,135 @@ router.post("/:pin/answer", async (req, res) => {
     return res.status(500).json({
       error: "Помилка перевірки відповіді"
     });
+  }
+});
+
+
+router.post("/:pin/olympiad/cell/:cellNumber/purchase", async (req, res) => {
+  const pin = String(req.params.pin || "").trim().toUpperCase();
+  const cellNumber = Number(req.params.cellNumber);
+
+  if (!Number.isInteger(cellNumber) || cellNumber < 1) {
+    return res.status(400).json({ error: "Невірний номер клітинки" });
+  }
+
+  try {
+    const gameData = await new Promise((resolve, reject) => {
+      getGameDataByPin(pin, (error, data) => error ? reject(error) : resolve(data));
+    });
+
+    if (!gameData) return res.status(404).json({ error: "Команду не знайдено" });
+    if (gameData.run_status === "ARCHIVED") return res.status(403).json({ error: "Цей запуск уже в архіві" });
+
+    const task = await new Promise((resolve, reject) => {
+      getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => error ? reject(error) : resolve(currentTask));
+    });
+
+    if (!task) return res.status(404).json({ error: "Команда вже завершила гру" });
+    if (task.task_type !== "OLYMPIAD") return res.status(400).json({ error: "Поточне завдання не є олімпійкою" });
+
+    const settings = await dbGet(`SELECT * FROM olympiad_settings WHERE task_id = ?`, [task.id]);
+    if (!settings) return res.status(400).json({ error: "Олімпійку не налаштовано" });
+
+    const elapsedSeconds = (() => {
+      if (!task.opened_at) return 0;
+      const openedDate = parseUtcDate(task.opened_at);
+      if (!openedDate || Number.isNaN(openedDate.getTime())) return 0;
+      return Math.floor((Date.now() - openedDate.getTime()) / 1000);
+    })();
+
+    const purchaseAfter = Number(settings.purchase_available_after_seconds || 0);
+    if (elapsedSeconds < purchaseAfter) {
+      return res.status(403).json({ error: "Купівля кодів ще недоступна" });
+    }
+
+    const cell = await dbGet(
+      `SELECT * FROM olympiad_cells WHERE task_id = ? AND cell_number = ?`,
+      [task.id, cellNumber]
+    );
+
+    if (!cell || !cell.task_answer_id) {
+      return res.status(404).json({ error: "Клітинку не знайдено" });
+    }
+
+    const existing = await dbGet(
+      `SELECT id FROM team_found_answers WHERE team_id = ? AND task_answer_id = ?`,
+      [gameData.team_id, cell.task_answer_id]
+    );
+
+    if (existing) {
+      const olympiad = await getOlympiadPayload(gameData.team_id, task.id);
+      return res.json({ accepted: true, repeated: true, message: "Цей код уже відкрито", olympiad });
+    }
+
+    await dbRun(
+      `INSERT INTO team_answers (team_id, task_id, answer, is_correct) VALUES (?, ?, ?, 1)`,
+      [gameData.team_id, task.id, `[куплено] ${cell.answer_text || `Клітинка ${cell.cell_number}`}`]
+    );
+
+    await dbRun(
+      `INSERT INTO team_found_answers (team_id, task_answer_id) VALUES (?, ?)`,
+      [gameData.team_id, cell.task_answer_id]
+    );
+
+    const purchaseValue = Math.max(0, Number(cell.purchase_value || 0));
+    if (purchaseValue > 0) {
+      await dbRun(
+        `
+        UPDATE team_tasks
+        SET penalty_seconds = penalty_seconds + ?
+        WHERE team_id = ? AND task_id = ?
+        `,
+        [purchaseValue, gameData.team_id, task.id]
+      );
+
+      await dbRun(
+        `
+        INSERT INTO team_time_adjustments (
+          team_id, task_id, adjustment_type, seconds, comment
+        )
+        VALUES (?, ?, 'MANUAL_PENALTY', ?, ?)
+        `,
+        [
+          gameData.team_id,
+          task.id,
+          purchaseValue,
+          `Купівля коду олімпійки №${cell.cell_number}: ${cell.answer_text || ""}`
+        ]
+      );
+    }
+
+    const completeResult = await checkOlympiadCompletion(gameData.team_id, task);
+    let nextExists = false;
+
+    if (completeResult.completed) {
+      nextExists = await new Promise((resolve, reject) => {
+        hasNextTask(gameData.team_id, gameData.game_id, (error, exists) => error ? reject(error) : resolve(exists));
+      });
+
+      if (!nextExists) {
+        await dbRun(
+          `UPDATE teams SET finished_at = CURRENT_TIMESTAMP WHERE id = ? AND finished_at IS NULL`,
+          [gameData.team_id]
+        );
+      }
+    }
+
+    const olympiad = await getOlympiadPayload(gameData.team_id, task.id);
+
+    return res.json({
+      accepted: true,
+      repeated: false,
+      message: cell.answer_text ? `Код ${cell.answer_text} прийнято` : `Код клітинки №${cell.cell_number} прийнято`,
+      task_completed: completeResult.completed,
+      has_next_task: nextExists,
+      olympiad,
+      found_main: completeResult.found_main,
+      required_main_answers: completeResult.required_main_answers
+    });
+  } catch (error) {
+    console.error("Olympiad purchase error:", error);
+    return res.status(500).json({ error: "Помилка купівлі коду" });
   }
 });
 

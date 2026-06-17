@@ -1243,7 +1243,7 @@ async function loadStatistics() {
         <option value="">Оберіть завдання або фініш</option>
         ${tasks.map(task => `
           <option value="${task.id}">
-            Завдання ${task.sort_order}: ${escapeHtml(task.title)}
+            ${String(task.title || "").trim() ? `Завдання ${task.sort_order}: ${escapeHtml(task.title)}` : `Завдання ${task.sort_order}`}
           </option>
         `).join("")}
         <option value="FINISH">Фініш</option>

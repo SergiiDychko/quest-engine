@@ -260,6 +260,7 @@ db.run(`
       level_count INTEGER NOT NULL,
       completion_type TEXT NOT NULL DEFAULT 'TOP_CELL',
       required_cells_count INTEGER,
+      purchase_available_after_seconds INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (task_id) REFERENCES tasks(id)
     )
   `);
@@ -273,9 +274,20 @@ db.run(`
       content TEXT,
       answer_text TEXT NOT NULL,
       comment TEXT,
-      FOREIGN KEY (task_id) REFERENCES tasks(id)
+      purchase_value INTEGER NOT NULL DEFAULT 0,
+      task_answer_id INTEGER,
+      FOREIGN KEY (task_id) REFERENCES tasks(id),
+      FOREIGN KEY (task_answer_id) REFERENCES task_answers(id)
     )
   `);
+
+  // Lightweight migrations for newer task mechanics.
+  db.run(`ALTER TABLE tasks ADD COLUMN hide_answers_block INTEGER NOT NULL DEFAULT 0`, () => {});
+  db.run(`ALTER TABLE olympiad_settings ADD COLUMN purchase_available_after_seconds INTEGER NOT NULL DEFAULT 0`, () => {});
+  db.run(`ALTER TABLE olympiad_cells ADD COLUMN purchase_value INTEGER NOT NULL DEFAULT 0`, () => {});
+  db.run(`ALTER TABLE olympiad_cells ADD COLUMN task_answer_id INTEGER`, () => {});
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_olympiad_cells_task_cell ON olympiad_cells(task_id, cell_number)`);
+
 });
 
 db.get(

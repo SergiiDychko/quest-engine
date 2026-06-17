@@ -84,19 +84,22 @@
 
     <section id="codesTab" class="tab-panel hidden">
       <h2>Коди завдання</h2>
+      <div id="olympiadSettingsBlock"></div>
       <div id="codesList">Завантаження...</div>
 
-      <hr />
+      <div id="addCodesBlock">
+        <hr />
 
-      <h2>Додати коди</h2>
-      <div class="add-codes-row">
-        <input id="codesCount" type="number" value="1" min="1" />
-        <select id="codesType">
-          <option value="MAIN">Основні</option>
-          <option value="BONUS">Бонусні</option>
-          <option value="PENALTY">Штрафні</option>
-        </select>
-        <button id="addCodesBtn">Додати ще</button>
+        <h2>Додати коди</h2>
+        <div class="add-codes-row">
+          <input id="codesCount" type="number" value="1" min="1" />
+          <select id="codesType">
+            <option value="MAIN">Основні</option>
+            <option value="BONUS">Бонусні</option>
+            <option value="PENALTY">Штрафні</option>
+          </select>
+          <button id="addCodesBtn">Додати ще</button>
+        </div>
       </div>
     </section>
 
@@ -143,6 +146,7 @@ const gameId = params.get("game");
 let currentTask = null;
 let currentAnswers = [];
 let currentHints = [];
+let currentOlympiad = null;
 
 document.querySelectorAll(".tab-btn").forEach(button => {
   button.addEventListener("click", () => {
@@ -153,6 +157,35 @@ document.querySelectorAll(".tab-btn").forEach(button => {
     document.getElementById(button.dataset.tab).classList.remove("hidden");
   });
 });
+
+function activateTab(tabId) {
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.tab === tabId);
+  });
+
+  document.querySelectorAll(".tab-panel").forEach(panel => {
+    panel.classList.toggle("hidden", panel.id !== tabId);
+  });
+}
+
+function updateTaskEditorMode() {
+  const type = document.getElementById("taskTypeSelect").value;
+  const isOlympiad = type === "OLYMPIAD";
+
+  const contentButton = document.querySelector('[data-tab="contentTab"]');
+  const codesButton = document.querySelector('[data-tab="codesTab"]');
+  const hintsButton = document.querySelector('[data-tab="hintsTab"]');
+
+  if (contentButton) contentButton.classList.toggle("hidden", isOlympiad);
+  if (hintsButton) hintsButton.classList.toggle("hidden", isOlympiad);
+  if (codesButton) codesButton.textContent = isOlympiad ? "Олімпійка" : "Коди";
+
+  if (isOlympiad) {
+    activateTab("codesTab");
+  } else if (document.querySelector('[data-tab="contentTab"]').classList.contains("hidden")) {
+    activateTab("codesTab");
+  }
+}
 
 async function loadTask() {
   const response = await fetch(`/api/tasks/${taskId}`);
@@ -176,19 +209,15 @@ document.getElementById("taskNameInput").value =
 document.getElementById("taskTypeSelect").value =
   currentTask.task_type || "STANDARD";
 
+  updateTaskEditorMode();
+
+  await loadOlympiadIfNeeded();
   renderCodes(currentAnswers);
   renderAutoTransition();
 }
 
 async function saveTaskHeader(options = {}) {
   const title = document.getElementById("taskNameInput").value.trim();
-
-  if (!title) {
-    if (!options.silent) {
-      alert("Вкажіть назву завдання");
-    }
-    return { ok: false, error: "Вкажіть назву завдання" };
-  }
 
   const response = await fetch(`/api/tasks/${taskId}`, {
     method: "PUT",
@@ -244,11 +273,14 @@ document
           title:
             document.getElementById("taskNameInput").value.trim(),
           task_type:
-            document.getElementById("taskTypeSelect").value
+            document.getElementById("taskTypeSelect").value,
+          hide_answers_block:
+            document.getElementById("taskTypeSelect").value === "OLYMPIAD"
         })
       });
 
     if (response.ok) {
+      updateTaskEditorMode();
       loadTask();
     }
 
@@ -309,7 +341,7 @@ async function loadContent() {
     root: contentRoot,
     blocks,
     previewTitle: currentTask
-      ? `Завдання ${currentTask.sort_order}. ${currentTask.title || ""}`
+      ? (String(currentTask.title || "").trim() ? `Завдання ${currentTask.sort_order}. ${currentTask.title}` : `Завдання ${currentTask.sort_order}.`)
       : "Попередній перегляд завдання"
   });
 }
@@ -346,7 +378,7 @@ document.getElementById("previewTaskContentBtn").addEventListener("click", () =>
   if (!contentBuilder) return;
 
   const title = currentTask
-    ? `Завдання ${currentTask.sort_order}. ${currentTask.title || ""}`
+    ? (String(currentTask.title || "").trim() ? `Завдання ${currentTask.sort_order}. ${currentTask.title}` : `Завдання ${currentTask.sort_order}.`)
     : "Попередній перегляд завдання";
 
   contentBuilder.openPreview(title);
@@ -456,8 +488,441 @@ function renderAutoTransition() {
     currentTask.auto_transition_penalty_seconds || 0;
 }
 
+
+async function loadOlympiadIfNeeded() {
+  currentOlympiad = null;
+
+  if (!currentTask || currentTask.task_type !== "OLYMPIAD") {
+    document.getElementById("olympiadSettingsBlock").innerHTML = "";
+    return;
+  }
+
+  const response = await fetch(`/api/tasks/${taskId}/olympiad`);
+  const result = await response.json();
+
+  if (!response.ok) {
+    document.getElementById("olympiadSettingsBlock").innerHTML = `
+      <div class="info-block error-text">${escapeHtml(result.error || "Помилка завантаження олімпійки")}</div>
+    `;
+    return;
+  }
+
+  currentOlympiad = result;
+  renderOlympiadEditor();
+}
+
+function calculateOlympiadTotalCells(x, l) {
+  let total = 0;
+  for (let level = 0; level < l; level++) {
+    total += Math.pow(x, level);
+  }
+  return total;
+}
+
+let olympiadCellContentEditor = null;
+let olympiadEditingCellNumber = null;
+
+function parseOlympiadCellBlocks(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [{
+      type: "SECTION",
+      content: JSON.stringify({
+        columns: [
+          {
+            width: 100,
+            blocks: [
+              {
+                type: "TEXT",
+                content: JSON.stringify({
+                  text: String(value || ""),
+                  html: `<p>${escapeHtml(String(value || ""))}</p>`,
+                  format: "tiptap"
+                })
+              }
+            ]
+          }
+        ]
+      })
+    }];
+  }
+}
+
+function stringifyOlympiadCellBlocks(blocks) {
+  return JSON.stringify(blocks || []);
+}
+
+function renderOlympiadCellPreview(content) {
+  const blocks = parseOlympiadCellBlocks(content);
+  if (!blocks.length) return `<span class="muted-text">Вміст не задано</span>`;
+  return QEContentRenderer.renderBlocks(blocks);
+}
+
+function isBottomOlympiadCell(cell, settings) {
+  return Number(cell.level_number) === Number(settings.level_count || 4);
+}
+
+function renderOlympiadEditor() {
+  const root = document.getElementById("olympiadSettingsBlock");
+  const settings = currentOlympiad.settings || {};
+  const cells = currentOlympiad.cells || [];
+  const total = cells.length || calculateOlympiadTotalCells(settings.association_count || 3, settings.level_count || 4);
+  const completionType = settings.completion_type || "TOP_CELL";
+
+  root.innerHTML = `
+    <div class="info-block olympiad-editor-block olympiad-compact-editor">
+      <h3>Налаштування олімпійки</h3>
+
+      <div class="olympiad-settings-list">
+        <label class="olympiad-setting-row">
+          <span>Кількість асоціацій X</span>
+          <input id="olympiadAssociationCount" type="number" min="2" max="6" value="${Number(settings.association_count) || 3}">
+        </label>
+
+        <label class="olympiad-setting-row">
+          <span>Кількість рівнів L</span>
+          <input id="olympiadLevelCount" type="number" min="2" max="6" value="${Number(settings.level_count) || 4}">
+        </label>
+
+        <label class="olympiad-setting-row olympiad-setting-row-wide">
+          <span>Умова завершення</span>
+          <select id="olympiadCompletionType">
+            <option value="TOP_CELL" ${completionType === "TOP_CELL" ? "selected" : ""}>достатньо здати верхню клітинку</option>
+            <option value="ALL" ${completionType === "ALL" ? "selected" : ""}>потрібно здати всі коди</option>
+            <option value="COUNT" ${completionType === "COUNT" ? "selected" : ""}>потрібно здати N будь-яких кодів</option>
+          </select>
+        </label>
+
+        <label id="olympiadRequiredCellsLabel" class="olympiad-setting-row">
+          <span>N кодів для завершення</span>
+          <input id="olympiadRequiredCellsCount" type="number" min="1" max="${total}" value="${settings.required_cells_count || total}">
+        </label>
+
+        <label class="olympiad-setting-row">
+          <span>Можливість купівлі кодів через, сек</span>
+          <input id="olympiadPurchaseAfterSeconds" type="number" min="0" value="${Number(settings.purchase_available_after_seconds) || 0}">
+        </label>
+
+        <label class="olympiad-setting-row olympiad-setting-checkbox-row">
+          <span>Приховати блок «Відповіді» для гравців</span>
+          <input id="hideAnswersBlockCheckbox" type="checkbox" ${currentTask.hide_answers_block ? "checked" : ""}>
+        </label>
+      </div>
+
+      <div class="save-row">
+        <button id="regenerateOlympiadBtn" type="button">Оновити структуру</button>
+        <button id="saveOlympiadBtn" type="button">Зберегти олімпійку</button>
+        <span id="saveOlympiadMessage"></span>
+      </div>
+    </div>
+
+    <div class="info-block olympiad-cells-editor">
+      <h3>Клітинки олімпійки: ${total}</h3>
+      <p class="muted-text">Для клітинок найнижчого рівня доступний вміст клітинки. Для всіх рівнів вкажіть відповідь і ціну купівлі.</p>
+      <div class="olympiad-cells-table-wrap">
+        <table class="olympiad-cells-table olympiad-cells-v2-table">
+          <thead>
+            <tr>
+              <th>№</th>
+              <th>Рівень</th>
+              <th>Питання / вміст клітинки</th>
+              <th>Відповідь</th>
+              <th>Купівля</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${cells.map(cell => {
+              const bottom = isBottomOlympiadCell(cell, settings);
+              return `
+                <tr data-olympiad-cell="${cell.cell_number}" data-cell-content="${escapeHtml(cell.content || "")}">
+                  <td>${cell.cell_number}</td>
+                  <td>${cell.level_number}</td>
+                  <td class="olympiad-cell-editor-content-col">
+                    ${bottom ? `
+                      <div class="olympiad-editor-cell-preview" data-olympiad-content-preview="${cell.cell_number}">
+                        ${renderOlympiadCellPreview(cell.content || "")}
+                      </div>
+                      <button type="button" class="olympiad-edit-content-btn" data-action="edit-olympiad-cell-content" data-cell-number="${cell.cell_number}">Редагувати вміст</button>
+                    ` : `<span class="muted-text">—</span>`}
+                  </td>
+                  <td>
+                    <input data-olympiad-field="answer_text" value="${escapeHtml(cell.answer_text || "")}" placeholder="Правильна відповідь">
+                  </td>
+                  <td>
+                    <input data-olympiad-field="purchase_value" type="number" min="0" value="${Number(cell.purchase_value) || 0}" placeholder="0">
+                  </td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="olympiadCellContentModal" class="modal-backdrop hidden">
+      <div class="modal-card olympiad-content-modal-card">
+        <div class="modal-header">
+          <h3 id="olympiadCellContentModalTitle">Вміст клітинки</h3>
+          <button type="button" class="small-light-btn" id="closeOlympiadCellContentModalBtn">×</button>
+        </div>
+        <div id="olympiadCellContentBuilder" class="olympiad-cell-content-builder"></div>
+        <div class="save-row">
+          <button type="button" id="saveOlympiadCellContentBtn">Застосувати вміст клітинки</button>
+          <span id="olympiadCellContentMessage"></span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("regenerateOlympiadBtn").addEventListener("click", regenerateOlympiadStructure);
+  document.getElementById("saveOlympiadBtn").addEventListener("click", saveOlympiad);
+  document.getElementById("olympiadCompletionType").addEventListener("change", updateOlympiadRequiredFieldState);
+  document.getElementById("closeOlympiadCellContentModalBtn").addEventListener("click", closeOlympiadCellContentModal);
+  document.getElementById("saveOlympiadCellContentBtn").addEventListener("click", applyOlympiadCellContent);
+
+  root.querySelectorAll('[data-action="edit-olympiad-cell-content"]').forEach(button => {
+    button.addEventListener("click", () => openOlympiadCellContentModal(Number(button.dataset.cellNumber)));
+  });
+
+  updateOlympiadRequiredFieldState();
+  QEContentRenderer.resizeHtmlFrames(root);
+}
+
+function updateOlympiadRequiredFieldState() {
+  const type = document.getElementById("olympiadCompletionType");
+  const label = document.getElementById("olympiadRequiredCellsLabel");
+  const input = document.getElementById("olympiadRequiredCellsCount");
+  if (!type || !input || !label) return;
+  const visible = type.value === "COUNT";
+  label.classList.toggle("hidden", !visible);
+  label.style.display = visible ? "" : "none";
+  input.disabled = !visible;
+}
+
+async function openOlympiadCellContentModal(cellNumber) {
+  olympiadEditingCellNumber = cellNumber;
+  const row = document.querySelector(`[data-olympiad-cell="${cellNumber}"]`);
+  const content = row?.dataset.cellContent || "";
+  const modal = document.getElementById("olympiadCellContentModal");
+  const root = document.getElementById("olympiadCellContentBuilder");
+
+  document.getElementById("olympiadCellContentModalTitle").textContent = `Вміст клітинки №${cellNumber}`;
+  modal.classList.remove("hidden");
+
+  olympiadCellContentEditor = new QEContentBuilder({
+    root,
+    blocks: parseOlympiadCellBlocks(content),
+    previewTitle: `Клітинка №${cellNumber}`
+  });
+}
+
+function closeOlympiadCellContentModal() {
+  const modal = document.getElementById("olympiadCellContentModal");
+  modal.classList.add("hidden");
+  olympiadEditingCellNumber = null;
+  olympiadCellContentEditor = null;
+}
+
+function applyOlympiadCellContent() {
+  if (!olympiadCellContentEditor || !olympiadEditingCellNumber) return;
+
+  let blocks;
+  try {
+    blocks = olympiadCellContentEditor.getBlocks();
+  } catch (error) {
+    document.getElementById("olympiadCellContentMessage").textContent = error.message || "Помилка перевірки вмісту";
+    return;
+  }
+
+  const serialized = stringifyOlympiadCellBlocks(blocks);
+  const row = document.querySelector(`[data-olympiad-cell="${olympiadEditingCellNumber}"]`);
+  if (row) {
+    row.dataset.cellContent = serialized;
+    const preview = row.querySelector(`[data-olympiad-content-preview="${olympiadEditingCellNumber}"]`);
+    if (preview) {
+      preview.innerHTML = renderOlympiadCellPreview(serialized);
+      QEContentRenderer.resizeHtmlFrames(preview);
+    }
+  }
+
+  closeOlympiadCellContentModal();
+}
+
+async function regenerateOlympiadStructure() {
+  const x = Number(document.getElementById("olympiadAssociationCount").value) || 3;
+  const l = Number(document.getElementById("olympiadLevelCount").value) || 4;
+  const oldCells = new Map((currentOlympiad?.cells || []).map(cell => [Number(cell.cell_number), cell]));
+
+  document.querySelectorAll("[data-olympiad-cell]").forEach(row => {
+    const number = Number(row.dataset.olympiadCell);
+    const old = oldCells.get(number) || {};
+    old.content = row.dataset.cellContent || old.content || "";
+    old.answer_text = row.querySelector('[data-olympiad-field="answer_text"]')?.value || old.answer_text || "";
+    old.purchase_value = Number(row.querySelector('[data-olympiad-field="purchase_value"]')?.value) || old.purchase_value || 0;
+    oldCells.set(number, old);
+  });
+
+  const meta = [];
+  let cellNumber = 1;
+  for (let level = l; level >= 1; level--) {
+    const count = Math.pow(x, level - 1);
+    for (let index = 0; index < count; index++) {
+      const old = oldCells.get(cellNumber) || {};
+      meta.push({
+        cell_number: cellNumber,
+        level_number: level,
+        content: old.content || "",
+        answer_text: old.answer_text || "",
+        purchase_value: Number(old.purchase_value) || 0
+      });
+      cellNumber += 1;
+    }
+  }
+
+  currentOlympiad = {
+    settings: {
+      association_count: x,
+      level_count: l,
+      completion_type: document.getElementById("olympiadCompletionType").value,
+      required_cells_count: document.getElementById("olympiadRequiredCellsCount").value,
+      purchase_available_after_seconds: document.getElementById("olympiadPurchaseAfterSeconds").value
+    },
+    cells: meta
+  };
+
+  renderOlympiadEditor();
+}
+
+function collectOlympiadPayload() {
+  const rows = Array.from(document.querySelectorAll("[data-olympiad-cell]"));
+  const cells = rows.map(row => ({
+    cell_number: Number(row.dataset.olympiadCell),
+    content: row.dataset.cellContent || "",
+    answer_text: row.querySelector('[data-olympiad-field="answer_text"]').value,
+    purchase_value: Number(row.querySelector('[data-olympiad-field="purchase_value"]').value) || 0,
+    comment: ""
+  }));
+
+  return {
+    association_count: Number(document.getElementById("olympiadAssociationCount").value) || 3,
+    level_count: Number(document.getElementById("olympiadLevelCount").value) || 4,
+    completion_type: document.getElementById("olympiadCompletionType").value,
+    required_cells_count: Number(document.getElementById("olympiadRequiredCellsCount").value) || null,
+    purchase_available_after_seconds: Number(document.getElementById("olympiadPurchaseAfterSeconds").value) || 0,
+    hide_answers_block: document.getElementById("hideAnswersBlockCheckbox").checked,
+    cells
+  };
+}
+
+
+function normalizeCodeForDuplicateCheck(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function findDuplicateCodes(items) {
+  const seen = new Map();
+
+  for (const item of items) {
+    const normalized = normalizeCodeForDuplicateCheck(item.value);
+    if (!normalized) continue;
+
+    if (seen.has(normalized)) {
+      return {
+        first: seen.get(normalized).label,
+        second: item.label,
+        value: item.value
+      };
+    }
+
+    seen.set(normalized, item);
+  }
+
+  return null;
+}
+
+function formatDuplicateCodeMessage(duplicate) {
+  return `Код ${duplicate.first} і код ${duplicate.second} однакові. Потрібно виправити.`;
+}
+
+function validateNoDuplicateCodes(items) {
+  const duplicate = findDuplicateCodes(items);
+  if (!duplicate) {
+    return { ok: true };
+  }
+
+  const error = formatDuplicateCodeMessage(duplicate);
+  alert(error);
+
+  return {
+    ok: false,
+    error
+  };
+}
+
+async function saveOlympiad(options = {}) {
+  if (!currentTask || currentTask.task_type !== "OLYMPIAD") {
+    return { ok: true };
+  }
+
+  const payload = collectOlympiadPayload();
+
+  const duplicateValidation = validateNoDuplicateCodes(
+    payload.cells.map(cell => ({
+      label: String(cell.cell_number),
+      value: cell.answer_text
+    })),
+    "saveOlympiadMessage"
+  );
+
+  if (!duplicateValidation.ok) {
+    return duplicateValidation;
+  }
+
+  const response = await fetch(`/api/tasks/${taskId}/olympiad`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  const result = await response.json();
+  const message = document.getElementById("saveOlympiadMessage");
+
+  if (!response.ok) {
+    if (message && !options.silent) {
+      message.className = "";
+      message.textContent = result.error || "Помилка збереження олімпійки";
+    }
+    return { ok: false, error: result.error || "Помилка збереження олімпійки" };
+  }
+
+  if (message && !options.silent) {
+    message.className = "success-message";
+    message.textContent = "✓ Олімпійку збережено";
+    setTimeout(() => { message.textContent = ""; }, 3000);
+  }
+
+  await loadOlympiadIfNeeded();
+  return { ok: true };
+}
+
 function renderCodes(answers) {
   const list = document.getElementById("codesList");
+
+  const addCodesBlock = document.getElementById("addCodesBlock");
+
+  if (currentTask && currentTask.task_type === "OLYMPIAD") {
+    if (addCodesBlock) addCodesBlock.classList.add("hidden");
+    list.innerHTML = `<p class="muted-text">Основні коди олімпійки редагуються у таблиці клітинок вище.</p>`;
+    return;
+  }
+
+  if (addCodesBlock) addCodesBlock.classList.remove("hidden");
 
   const mainAnswers = answers.filter(a => a.answer_type === "MAIN");
   const bonusAnswers = answers.filter(a => a.answer_type === "BONUS");
@@ -554,6 +1019,7 @@ async function saveAllCodes() {
 
     return {
       id: answer.id,
+      sort_order: answer.sort_order,
       answer_type: answer.answer_type,
       answer_text: document.querySelector(`[data-id="${answer.id}"][data-field="answer_text"]`).value,
       description: document.querySelector(`[data-id="${answer.id}"][data-field="description"]`).value,
@@ -561,6 +1027,17 @@ async function saveAllCodes() {
       time_modifier_seconds: timeInput ? timeInput.value : 0
     };
   });
+
+  const duplicateValidation = validateNoDuplicateCodes(
+    answers.map(answer => ({
+      label: String(answer.sort_order),
+      value: answer.answer_text
+    }))
+  );
+
+  if (!duplicateValidation.ok) {
+    return duplicateValidation;
+  }
 
   const requiredInput = document.getElementById("requiredMainAnswers");
 
@@ -575,8 +1052,13 @@ async function saveAllCodes() {
 
   const result = await response.json();
 
+  if (!response.ok) {
+    alert(result.error || "Помилка збереження кодів");
+    return;
+  }
+
   document.getElementById("message").textContent =
-    response.ok ? `Коди збережено о ${new Date().toLocaleTimeString()}` : result.error;
+    `Коди збережено о ${new Date().toLocaleTimeString()}`;
 
   loadTask();
 }
@@ -692,6 +1174,10 @@ async function saveAllHintsSilently() {
 }
 
 async function saveAllCodesSilently() {
+  if (currentTask && currentTask.task_type === "OLYMPIAD") {
+    return saveOlympiad({ silent: true });
+  }
+
   if (!currentAnswers.length) {
     return { ok: true };
   }
@@ -709,6 +1195,7 @@ async function saveAllCodesSilently() {
 
     return {
       id: answer.id,
+      sort_order: answer.sort_order,
       answer_type: answer.answer_type,
       answer_text: document.querySelector(`[data-id="${answer.id}"][data-field="answer_text"]`).value,
       description: document.querySelector(`[data-id="${answer.id}"][data-field="description"]`).value,
@@ -716,6 +1203,17 @@ async function saveAllCodesSilently() {
       time_modifier_seconds: timeInput ? timeInput.value : 0
     };
   });
+
+  const duplicateValidation = validateNoDuplicateCodes(
+    answers.map(answer => ({
+      label: String(answer.sort_order),
+      value: answer.answer_text
+    }))
+  );
+
+  if (!duplicateValidation.ok) {
+    return duplicateValidation;
+  }
 
   const requiredInput = document.getElementById("requiredMainAnswers");
 

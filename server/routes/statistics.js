@@ -191,6 +191,7 @@ function calculatePenaltySeconds(adjustments) {
     .filter(item =>
       item.adjustment_type === "PENALTY_CODE" ||
       item.adjustment_type === "AUTO_TRANSITION" ||
+      item.adjustment_type === "OLYMPIAD_PURCHASE" ||
       item.adjustment_type === "MANUAL_PENALTY"
     )
     .reduce((sum, item) => {

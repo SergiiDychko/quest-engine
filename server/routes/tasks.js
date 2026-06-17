@@ -10,6 +10,91 @@ function requireAuth(req, res, next) {
   next();
 }
 
+
+function dbGet(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (error, row) => {
+      if (error) reject(error);
+      else resolve(row);
+    });
+  });
+}
+
+function dbAll(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (error, rows) => {
+      if (error) reject(error);
+      else resolve(rows);
+    });
+  });
+}
+
+function dbRun(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function(error) {
+      if (error) reject(error);
+      else resolve(this);
+    });
+  });
+}
+
+
+function normalizeCodeForDuplicateCheck(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function findDuplicateCodes(items) {
+  const seen = new Map();
+
+  for (const item of items) {
+    const normalized = normalizeCodeForDuplicateCheck(item.value);
+    if (!normalized) continue;
+
+    if (seen.has(normalized)) {
+      return {
+        first: seen.get(normalized).label,
+        second: item.label
+      };
+    }
+
+    seen.set(normalized, item);
+  }
+
+  return null;
+}
+
+function formatDuplicateCodeMessage(duplicate) {
+  return `Код ${duplicate.first} і код ${duplicate.second} однакові. Потрібно виправити.`;
+}
+
+function generateOlympiadCellsMeta(associationCount, levelCount) {
+  const x = Number(associationCount);
+  const l = Number(levelCount);
+  const cells = [];
+  let cellNumber = 1;
+
+  for (let level = l; level >= 1; level--) {
+    const count = Math.pow(x, level - 1);
+    for (let index = 0; index < count; index++) {
+      cells.push({
+        cell_number: cellNumber,
+        level_number: level,
+        index_in_level: index
+      });
+      cellNumber += 1;
+    }
+  }
+
+  return cells;
+}
+
+function getOlympiadTotalCells(associationCount, levelCount) {
+  return generateOlympiadCellsMeta(associationCount, levelCount).length;
+}
+
 router.get("/:id", requireAuth, (req, res) => {
   const taskId = req.params.id;
 
@@ -30,13 +115,7 @@ router.get("/:id", requireAuth, (req, res) => {
 
 router.put("/:id", requireAuth, (req, res) => {
   const taskId = req.params.id;
-  const { title, task_type } = req.body;
-
-  if (!title || !title.trim()) {
-    return res.status(400).json({
-      error: "Назва завдання обовʼязкова"
-    });
-  }
+  const { title, task_type, hide_answers_block } = req.body;
 
   if (task_type && !["STANDARD", "OLYMPIAD"].includes(task_type)) {
     return res.status(400).json({
@@ -44,16 +123,25 @@ router.put("/:id", requireAuth, (req, res) => {
     });
   }
 
+  const hasHideAnswers = Object.prototype.hasOwnProperty.call(req.body, "hide_answers_block");
+
   db.run(
     `
     UPDATE tasks
     SET
       title = ?,
       task_type = COALESCE(?, task_type),
+      hide_answers_block = CASE WHEN ? THEN ? ELSE hide_answers_block END,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
     `,
-    [title.trim(), task_type || null, taskId],
+    [
+      String(title || "").trim(),
+      task_type || null,
+      hasHideAnswers ? 1 : 0,
+      hide_answers_block ? 1 : 0,
+      taskId
+    ],
     function(error) {
       if (error) {
         return res.status(500).json({
@@ -66,6 +154,215 @@ router.put("/:id", requireAuth, (req, res) => {
       });
     }
   );
+});
+
+
+router.get("/:id/olympiad", requireAuth, async (req, res) => {
+  const taskId = req.params.id;
+
+  try {
+    const task = await dbGet(`SELECT id, task_type, hide_answers_block FROM tasks WHERE id = ?`, [taskId]);
+    if (!task) return res.status(404).json({ error: "Завдання не знайдено" });
+
+    const settings = await dbGet(
+      `SELECT * FROM olympiad_settings WHERE task_id = ?`,
+      [taskId]
+    );
+
+    const cells = await dbAll(
+      `SELECT * FROM olympiad_cells WHERE task_id = ? ORDER BY cell_number ASC`,
+      [taskId]
+    );
+
+    const fallbackSettings = {
+      association_count: 3,
+      level_count: 4,
+      completion_type: "TOP_CELL",
+      required_cells_count: null,
+      purchase_available_after_seconds: 0
+    };
+
+    const effectiveSettings = settings || fallbackSettings;
+    const meta = generateOlympiadCellsMeta(
+      effectiveSettings.association_count,
+      effectiveSettings.level_count
+    );
+
+    const existingByNumber = new Map(cells.map(cell => [Number(cell.cell_number), cell]));
+
+    res.json({
+      task: {
+        id: task.id,
+        task_type: task.task_type,
+        hide_answers_block: Number(task.hide_answers_block) || 0
+      },
+      settings: effectiveSettings,
+      cells: meta.map(item => ({
+        ...item,
+        id: existingByNumber.get(item.cell_number)?.id || null,
+        content: existingByNumber.get(item.cell_number)?.content || "",
+        answer_text: existingByNumber.get(item.cell_number)?.answer_text || "",
+        comment: existingByNumber.get(item.cell_number)?.comment || "",
+        purchase_value: existingByNumber.get(item.cell_number)?.purchase_value || 0,
+        task_answer_id: existingByNumber.get(item.cell_number)?.task_answer_id || null
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Помилка завантаження олімпійки" });
+  }
+});
+
+router.put("/:id/olympiad", requireAuth, async (req, res) => {
+  const taskId = req.params.id;
+  const associationCount = Number(req.body.association_count);
+  const levelCount = Number(req.body.level_count);
+  const completionType = String(req.body.completion_type || "TOP_CELL").toUpperCase();
+  const requiredCellsCount = Number(req.body.required_cells_count) || null;
+  const purchaseAvailableAfterSeconds = Math.max(0, Number(req.body.purchase_available_after_seconds) || 0);
+  const hideAnswersBlock = req.body.hide_answers_block ? 1 : 0;
+  const cells = Array.isArray(req.body.cells) ? req.body.cells : [];
+
+  if (!Number.isInteger(associationCount) || associationCount < 2 || associationCount > 6) {
+    return res.status(400).json({ error: "Кількість асоціацій має бути від 2 до 6" });
+  }
+
+  if (!Number.isInteger(levelCount) || levelCount < 2 || levelCount > 6) {
+    return res.status(400).json({ error: "Кількість рівнів має бути від 2 до 6" });
+  }
+
+  if (!["ALL", "TOP_CELL", "COUNT"].includes(completionType)) {
+    return res.status(400).json({ error: "Невірна умова завершення олімпійки" });
+  }
+
+  const meta = generateOlympiadCellsMeta(associationCount, levelCount);
+  const totalCells = meta.length;
+
+  const cellByNumberForValidation = new Map(
+    cells.map(cell => [Number(cell.cell_number), cell])
+  );
+
+  const duplicate = findDuplicateCodes(
+    meta.map(item => ({
+      label: String(item.cell_number),
+      value: cellByNumberForValidation.get(item.cell_number)?.answer_text || ""
+    }))
+  );
+
+  if (duplicate) {
+    return res.status(400).json({ error: formatDuplicateCodeMessage(duplicate) });
+  }
+
+  if (completionType === "COUNT") {
+    if (!requiredCellsCount || requiredCellsCount < 1 || requiredCellsCount > totalCells) {
+      return res.status(400).json({ error: "Кількість кодів для завершення має бути від 1 до загальної кількості клітинок" });
+    }
+  }
+
+  const cellByNumber = new Map(
+    cells.map(cell => [Number(cell.cell_number), cell])
+  );
+
+  try {
+    await dbRun("BEGIN TRANSACTION");
+
+    await dbRun(
+      `UPDATE tasks SET task_type = 'OLYMPIAD', hide_answers_block = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [hideAnswersBlock, taskId]
+    );
+
+    await dbRun(`DELETE FROM olympiad_cells WHERE task_id = ?`, [taskId]);
+    await dbRun(`DELETE FROM team_found_answers WHERE task_answer_id IN (SELECT id FROM task_answers WHERE task_id = ? AND answer_type = 'MAIN')`, [taskId]);
+    await dbRun(`DELETE FROM task_answers WHERE task_id = ? AND answer_type = 'MAIN'`, [taskId]);
+    await dbRun(`DELETE FROM olympiad_settings WHERE task_id = ?`, [taskId]);
+
+    await dbRun(
+      `
+      INSERT INTO olympiad_settings (
+        task_id,
+        association_count,
+        level_count,
+        completion_type,
+        required_cells_count,
+        purchase_available_after_seconds
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      [
+        taskId,
+        associationCount,
+        levelCount,
+        completionType,
+        completionType === "COUNT" ? requiredCellsCount : null,
+        purchaseAvailableAfterSeconds
+      ]
+    );
+
+    for (const item of meta) {
+      const inputCell = cellByNumber.get(item.cell_number) || {};
+      const answerText = String(inputCell.answer_text || "").trim();
+      const content = String(inputCell.content || "");
+      const comment = String(inputCell.comment || "");
+      const purchaseValue = Math.max(0, Number(inputCell.purchase_value) || 0);
+
+      const answerResult = await dbRun(
+        `
+        INSERT INTO task_answers (
+          task_id,
+          answer_text,
+          answer_type,
+          description,
+          time_modifier_seconds,
+          comment,
+          sort_order
+        )
+        VALUES (?, ?, 'MAIN', ?, 0, ?, ?)
+        `,
+        [
+          taskId,
+          answerText,
+          `Клітинка ${item.cell_number}`,
+          comment,
+          item.cell_number
+        ]
+      );
+
+      await dbRun(
+        `
+        INSERT INTO olympiad_cells (
+          task_id,
+          cell_number,
+          level_number,
+          content,
+          answer_text,
+          comment,
+          purchase_value,
+          task_answer_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          taskId,
+          item.cell_number,
+          item.level_number,
+          content,
+          answerText,
+          comment,
+          purchaseValue,
+          answerResult.lastID
+        ]
+      );
+    }
+
+    await dbRun("COMMIT");
+
+    res.json({
+      message: "Олімпійку збережено",
+      total_cells: totalCells
+    });
+  } catch (error) {
+    try { await dbRun("ROLLBACK"); } catch (rollbackError) {}
+    res.status(500).json({ error: "Помилка збереження олімпійки" });
+  }
 });
 
 router.delete("/:id", requireAuth, (req, res) => {
@@ -223,6 +520,17 @@ router.put("/:id/answers", requireAuth, (req, res) => {
 
   if (!Array.isArray(answers)) {
     return res.status(400).json({ error: "Немає списку кодів" });
+  }
+
+  const duplicate = findDuplicateCodes(
+    answers.map(answer => ({
+      label: String(answer.sort_order || ""),
+      value: answer.answer_text || ""
+    }))
+  );
+
+  if (duplicate) {
+    return res.status(400).json({ error: formatDuplicateCodeMessage(duplicate) });
   }
 
   const mainAnswersCount = answers.filter(a => a.answer_type === "MAIN").length;

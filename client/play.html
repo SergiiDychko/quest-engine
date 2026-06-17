@@ -68,6 +68,8 @@
 
       <div id="taskContent" class="task-content"></div>
 
+      <div id="olympiadBlock" class="olympiad-player-block hidden"></div>
+
       <div id="formatBlock" class="info-block hidden">
         <h3>Відповіді</h3>
         <div id="formatContent"></div>
@@ -94,6 +96,10 @@ let currentAnswers = [];
 let currentFoundAnswers = [];
 let currentTeamName = "";
 let currentTask = null;
+let currentOlympiad = null;
+let olympiadTimerInterval = null;
+let olympiadPurchaseReady = false;
+let previousOlympiadPurchaseReady = null;
 
 function escapeHtml(text) {
   return String(text || "")
@@ -209,6 +215,7 @@ async function loadGame() {
   currentTask = result.task;
   currentAnswers = result.answers || [];
   currentFoundAnswers = result.found_answers || [];
+  currentOlympiad = result.olympiad || null;
   currentTeamName = result.game.team_name || "";
 
   document.getElementById("teamNameDisplay").textContent = currentTeamName;
@@ -217,10 +224,12 @@ async function loadGame() {
   document.getElementById("gameTitle").textContent =
     result.game.game_title;
 
+  const taskName = String(result.task.title || "").trim();
   document.getElementById("taskTitle").textContent =
-    `Завдання ${result.task.sort_order}. ${result.task.title}`;
+    taskName ? `Завдання ${result.task.sort_order}. ${taskName}` : `Завдання ${result.task.sort_order}.`;
 
   renderContent(result.content || []);
+  renderOlympiad();
   renderFormat();
   renderHintsAndAutoTransition(result.hints || [], result.task);
 }
@@ -236,6 +245,267 @@ function renderContent(content) {
   container.innerHTML = QEContentRenderer.renderBlocks(content);
   QEContentRenderer.resizeHtmlFrames(container);
 }
+
+
+function parseOlympiadCellBlocks(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [{
+      type: "SECTION",
+      content: JSON.stringify({
+        columns: [
+          {
+            width: 100,
+            blocks: [
+              {
+                type: "TEXT",
+                content: JSON.stringify({
+                  html: `<p>${escapeHtml(String(value || ""))}</p>`,
+                  text: String(value || ""),
+                  format: "tiptap"
+                })
+              }
+            ]
+          }
+        ]
+      })
+    }];
+  }
+}
+
+function renderOlympiadCellContent(cell) {
+  const contentValue = String(cell.content || "").trim();
+  if (!contentValue) {
+    return `<span class="olympiad-cell-number">${cell.cell_number}</span>`;
+  }
+
+  const blocks = parseOlympiadCellBlocks(contentValue);
+  if (!blocks.length) {
+    return `<span class="olympiad-cell-number">${cell.cell_number}</span>`;
+  }
+
+  return QEContentRenderer.renderBlocks(blocks);
+}
+
+function formatOlympiadPurchaseLabel(value) {
+  const amount = Math.max(0, Number(value) || 0);
+  return `Купити (+${amount} сек)`;
+}
+
+function renderOlympiad() {
+  const block = document.getElementById("olympiadBlock");
+
+  if (!currentOlympiad || !currentOlympiad.settings || !Array.isArray(currentOlympiad.cells)) {
+    block.classList.add("hidden");
+    block.innerHTML = "";
+    return;
+  }
+
+  block.classList.remove("hidden");
+
+  const settings = currentOlympiad.settings;
+  const cells = currentOlympiad.cells || [];
+  const x = Number(settings.association_count) || 3;
+  const l = Number(settings.level_count) || 4;
+  const bottomRows = Math.pow(x, l - 1);
+  const byLevel = new Map();
+
+  cells.forEach(cell => {
+    const level = Number(cell.level_number);
+    if (!byLevel.has(level)) byLevel.set(level, []);
+    byLevel.get(level).push(cell);
+  });
+
+  for (const list of byLevel.values()) {
+    list.sort((a, b) => Number(a.cell_number) - Number(b.cell_number));
+  }
+
+  let html = `
+    <h3>Олімпійка</h3>
+    <div class="olympiad-table-wrap">
+      <table class="olympiad-table">
+        <tbody>
+  `;
+
+  for (let row = 0; row < bottomRows; row++) {
+    html += "<tr>";
+
+    for (let level = l; level >= 1; level--) {
+      const count = Math.pow(x, level - 1);
+      const rowSpan = bottomRows / count;
+
+      if (row % rowSpan !== 0) continue;
+
+      const index = Math.floor(row / rowSpan);
+      const cell = (byLevel.get(level) || [])[index];
+      if (!cell) continue;
+
+      const isBottom = Number(cell.level_number) === l;
+      const foundClass = cell.is_found ? "found" : "closed";
+      const purchaseButton = (!cell.is_found && olympiadPurchaseReady)
+        ? `<button type="button" class="olympiad-buy-btn" data-olympiad-buy-cell="${cell.cell_number}">${formatOlympiadPurchaseLabel(cell.purchase_value)}</button>`
+        : "";
+
+      let content = "";
+
+      if (cell.is_found) {
+        content = `<div class="olympiad-found-answer">${escapeHtml(cell.answer_text || "")}</div>`;
+      } else if (isBottom) {
+        const previewContent = renderOlympiadCellContent(cell);
+        content = `
+          <div class="olympiad-scaled-preview" data-olympiad-preview="${cell.cell_number}" title="Натисніть для збільшення">
+            <div class="olympiad-scaled-preview-inner">
+              ${previewContent}
+            </div>
+          </div>
+          ${purchaseButton}
+        `;
+      } else {
+        content = `
+          <span class="olympiad-cell-number">${cell.cell_number}</span>
+          ${purchaseButton}
+        `;
+      }
+
+      html += `
+        <td rowspan="${rowSpan}" class="olympiad-cell ${foundClass} ${isBottom ? "bottom-level" : ""} olympiad-level-${level}">
+          <div class="olympiad-cell-index">${cell.cell_number}</div>
+          <div class="olympiad-cell-content">${content}</div>
+        </td>
+      `;
+    }
+
+    html += "</tr>";
+  }
+
+  html += `
+        </tbody>
+      </table>
+    </div>
+
+    <div id="olympiadPreviewModal" class="modal-backdrop hidden">
+      <div class="modal-card olympiad-preview-modal-card">
+        <div class="modal-header">
+          <h3 id="olympiadPreviewModalTitle">Клітинка</h3>
+          <button type="button" class="small-light-btn" id="closeOlympiadPreviewModalBtn">×</button>
+        </div>
+        <div id="olympiadPreviewModalContent" class="olympiad-full-preview-content"></div>
+      </div>
+    </div>
+  `;
+
+  block.innerHTML = html;
+
+  block.querySelectorAll("[data-olympiad-preview]").forEach(preview => {
+    preview.addEventListener("click", () => openOlympiadPreviewModal(Number(preview.dataset.olympiadPreview)));
+  });
+
+  block.querySelectorAll("[data-olympiad-buy-cell]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      buyOlympiadCell(Number(button.dataset.olympiadBuyCell));
+    });
+  });
+
+  const closeBtn = document.getElementById("closeOlympiadPreviewModalBtn");
+  if (closeBtn) closeBtn.addEventListener("click", closeOlympiadPreviewModal);
+
+  const modal = document.getElementById("olympiadPreviewModal");
+  if (modal) {
+    modal.addEventListener("click", event => {
+      if (event.target === modal) closeOlympiadPreviewModal();
+    });
+  }
+
+  fitOlympiadPreviews();
+  QEContentRenderer.resizeHtmlFrames(block);
+}
+
+function fitOlympiadPreviews() {
+  document.querySelectorAll(".olympiad-scaled-preview").forEach(preview => {
+    const inner = preview.querySelector(".olympiad-scaled-preview-inner");
+    if (!inner) return;
+
+    inner.style.transform = "scale(1)";
+    preview.style.width = "auto";
+    preview.style.height = "auto";
+
+    const maxWidth = window.innerWidth <= 720 ? 160 : 200;
+    const maxHeight = window.innerWidth <= 720 ? 90 : 100;
+
+    const width = Math.max(1, inner.scrollWidth || inner.offsetWidth || maxWidth);
+    const height = Math.max(1, inner.scrollHeight || inner.offsetHeight || maxHeight);
+    const scale = Math.min(1, maxWidth / width, maxHeight / height);
+
+    inner.style.transform = `scale(${scale})`;
+    preview.style.width = `${Math.ceil(width * scale)}px`;
+    preview.style.height = `${Math.ceil(height * scale)}px`;
+  });
+}
+
+function openOlympiadPreviewModal(cellNumber) {
+  const cell = (currentOlympiad?.cells || []).find(item => Number(item.cell_number) === Number(cellNumber));
+  if (!cell) return;
+
+  const modal = document.getElementById("olympiadPreviewModal");
+  const title = document.getElementById("olympiadPreviewModalTitle");
+  const content = document.getElementById("olympiadPreviewModalContent");
+
+  if (!modal || !content || !title) return;
+
+  title.textContent = `Клітинка №${cellNumber}`;
+  content.innerHTML = cell.is_found
+    ? `<div class="olympiad-found-answer full">${escapeHtml(cell.answer_text || "")}</div>`
+    : renderOlympiadCellContent(cell);
+
+  modal.classList.remove("hidden");
+  QEContentRenderer.resizeHtmlFrames(content);
+}
+
+function closeOlympiadPreviewModal() {
+  const modal = document.getElementById("olympiadPreviewModal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function buyOlympiadCell(cellNumber) {
+  const cell = (currentOlympiad?.cells || []).find(item => Number(item.cell_number) === Number(cellNumber));
+  const purchaseValue = Math.max(0, Number(cell?.purchase_value) || 0);
+
+  const confirmed = confirm(`Купити код клітинки №${cellNumber}?\n\nКоманді буде нараховано штраф: +${purchaseValue} сек.`);
+  if (!confirmed) return;
+
+  const response = await fetch(`/api/play/${pin}/olympiad/cell/${cellNumber}/purchase`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    showPlainAnswerMessage(result.error || "Помилка купівлі коду", "error");
+    return;
+  }
+
+  showPlainAnswerMessage(result.message || "Код куплено", "success");
+
+  if (result.olympiad) {
+    currentOlympiad = result.olympiad;
+    renderOlympiad();
+  }
+
+  if (result.task_completed) {
+    setTimeout(loadGame, 700);
+  }
+}
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    closeOlympiadPreviewModal();
+  }
+});
 
 function renderFormat() {
   const block = document.getElementById("formatBlock");
@@ -308,6 +578,59 @@ function renderHintsAndAutoTransition(hints, task) {
   if (hintsInterval) {
     clearInterval(hintsInterval);
     hintsInterval = null;
+  }
+
+  if (olympiadTimerInterval) {
+    clearInterval(olympiadTimerInterval);
+    olympiadTimerInterval = null;
+  }
+
+  previousOlympiadPurchaseReady = null;
+
+  if (task && task.task_type === "OLYMPIAD" && currentOlympiad?.settings) {
+    block.classList.remove("hidden");
+
+    const purchaseAfter = Number(currentOlympiad.settings.purchase_available_after_seconds || 0);
+
+    const updateOlympiadPurchaseTimer = () => {
+      const elapsed = getElapsedSecondsFromOpenedAt(task.opened_at);
+      const remaining = Math.max(0, purchaseAfter - elapsed);
+      olympiadPurchaseReady = remaining <= 0;
+
+      if (olympiadPurchaseReady) {
+        container.innerHTML = `
+          <div class="hint-timer olympiad-purchase-ready">
+            Купівля кодів уже доступна. Натисніть «Купити» у потрібній клітинці.
+          </div>
+        `;
+      } else {
+        container.innerHTML = `
+          <div class="hint-timer olympiad-purchase-timer">
+            Можливість купити коди зʼявиться через:
+            <strong>${formatSeconds(remaining)}</strong>
+          </div>
+        `;
+      }
+
+      const shouldRerenderOlympiad = previousOlympiadPurchaseReady !== olympiadPurchaseReady;
+      previousOlympiadPurchaseReady = olympiadPurchaseReady;
+
+      if (shouldRerenderOlympiad) {
+        renderOlympiad();
+      }
+
+      if (remaining <= 0 && olympiadTimerInterval) {
+        clearInterval(olympiadTimerInterval);
+        olympiadTimerInterval = null;
+      }
+    };
+
+    updateOlympiadPurchaseTimer();
+    if (!olympiadPurchaseReady) {
+      olympiadTimerInterval = setInterval(updateOlympiadPurchaseTimer, 1000);
+    }
+
+    return;
   }
 
   const hasHints = hints.length > 0;
@@ -570,6 +893,7 @@ async function submitAnswer() {
       }
     });
 
+    if (result.olympiad) { currentOlympiad = result.olympiad; renderOlympiad(); }
     renderFormat();
   } else if (result.found) {
     currentFoundAnswers.push({
@@ -582,7 +906,13 @@ async function submitAnswer() {
       time_modifier_seconds: result.found.time_modifier_seconds
     });
 
+    if (result.olympiad) { currentOlympiad = result.olympiad; renderOlympiad(); }
     renderFormat();
+  }
+
+  if (result.olympiad) {
+    currentOlympiad = result.olympiad;
+    renderOlympiad();
   }
 
   if (result.task_completed) {
