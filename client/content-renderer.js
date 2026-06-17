@@ -40,6 +40,20 @@
     return "";
   }
 
+  function dimensionStyle(data, defaults = {}) {
+    const widthValue = String(data.widthValue || defaults.widthValue || "").trim();
+    const widthUnit = data.widthUnit === "%" ? "%" : "px";
+    const heightValue = String(data.heightValue || defaults.heightValue || "").trim();
+    const heightUnit = data.heightUnit === "%" ? "%" : "px";
+    const styles = [];
+
+    if (widthValue) styles.push(`width:${widthValue}${widthUnit}`);
+    if (heightValue) styles.push(`height:${heightValue}${heightUnit}`);
+    if (!heightValue) styles.push("height:auto");
+
+    styles.push("max-width:100%");
+    return styles.join(";");
+  }
 
   function resizeFrame(frame) {
     if (!frame) return;
@@ -114,9 +128,12 @@
     const data = parseBlock(block.content || block.data || block);
 
     if (type === "TEXT") {
+      const html = data.html || "";
+      const legacyText = escapeHtml(data.text || "").replaceAll("\n", "<br>");
+
       return `
-        <div class="content-block content-text-block">
-          ${escapeHtml(data.text || "").replaceAll("\n", "<br>")}
+        <div class="content-block content-text-block tiptap-rendered-content">
+          ${html || legacyText}
         </div>
       `;
     }
@@ -124,10 +141,11 @@
     if (type === "IMAGE") {
       const src = data.url || "";
       if (!src) return "";
+      const style = dimensionStyle(data, { widthValue: "600" });
 
       return `
         <figure class="content-block content-image-block">
-          <img src="${escapeHtml(src)}" alt="${escapeHtml(data.alt || "")}">
+          <img src="${escapeHtml(src)}" alt="${escapeHtml(data.alt || "")}" style="${escapeHtml(style)}">
           ${data.caption ? `<figcaption>${escapeHtml(data.caption)}</figcaption>` : ""}
         </figure>
       `;
@@ -136,11 +154,12 @@
     if (type === "VIDEO") {
       const url = data.url || "";
       if (!url) return "";
-
+      const containerStyle = dimensionStyle(data, { widthValue: "720" });
       const youtubeEmbed = getYouTubeEmbedUrl(url);
+
       if (youtubeEmbed) {
         return `
-          <div class="content-block content-video-block">
+          <div class="content-block content-video-block" style="${escapeHtml(containerStyle)}">
             <iframe
               src="${escapeHtml(youtubeEmbed)}"
               title="Відео"
@@ -152,7 +171,7 @@
       }
 
       return `
-        <div class="content-block content-video-block">
+        <div class="content-block content-video-block" style="${escapeHtml(containerStyle)}">
           <video controls src="${escapeHtml(url)}"></video>
         </div>
       `;
@@ -174,6 +193,21 @@
         <div class="content-block content-custom-html-block">
           ${renderHtmlBlock(data)}
         </div>
+      `;
+    }
+
+    if (type === "SECTION") {
+      const columns = Array.isArray(data.columns) ? data.columns : [];
+      if (!columns.length) return "";
+
+      return `
+        <section class="content-block content-section-block">
+          ${columns.map(column => `
+            <div class="content-section-column" style="flex-basis:${Number(column.width) || 1}%;">
+              ${renderBlocks(column.blocks || [])}
+            </div>
+          `).join("")}
+        </section>
       `;
     }
 

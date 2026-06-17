@@ -88,11 +88,52 @@ router.put("/:taskId/bulk", requireAuth, (req, res) => {
     return res.status(400).json({ error: "Немає списку блоків" });
   }
 
-  const allowedTypes = new Set(["TEXT", "IMAGE", "VIDEO", "AUDIO", "HTML"]);
+  const allowedTypes = new Set(["TEXT", "IMAGE", "VIDEO", "AUDIO", "HTML", "SECTION"]);
+
+  function parseContent(content) {
+    if (!content) return {};
+    if (typeof content === "object") return content;
+
+    try {
+      const parsed = JSON.parse(content);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function validateBlock(block) {
+    const type = String(block.type || "").toUpperCase();
+
+    if (!allowedTypes.has(type)) {
+      return false;
+    }
+
+    if (type !== "SECTION") {
+      return true;
+    }
+
+    const data = parseContent(block.content);
+    const columns = Array.isArray(data.columns) ? data.columns : [];
+
+    if (!columns.length) {
+      return false;
+    }
+
+    const sum = columns.reduce((total, column) => total + Number(column.width || 0), 0);
+
+    if (Math.round(sum) !== 100) {
+      return false;
+    }
+
+    return columns.every(column => {
+      const childBlocks = Array.isArray(column.blocks) ? column.blocks : [];
+      return childBlocks.every(validateBlock);
+    });
+  }
 
   for (const block of blocks) {
-    const type = String(block.type || "").toUpperCase();
-    if (!allowedTypes.has(type)) {
+    if (!validateBlock(block)) {
       return res.status(400).json({ error: "Некоректний тип блоку" });
     }
   }

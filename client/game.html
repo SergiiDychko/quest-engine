@@ -392,9 +392,21 @@ async function saveSystemPage(pageType) {
       custom_css: css || ""
     };
   } else {
+    let blocks;
+    try {
+      blocks = systemPageBuilder ? systemPageBuilder.getBlocks() : [];
+    } catch (error) {
+      const message = document.getElementById("savePageMessage");
+      if (message) {
+        message.className = "error-text";
+        message.textContent = error.message || "Помилка перевірки секцій";
+      }
+      return;
+    }
+
     payload = {
       title: document.getElementById("pageTitleInput").value.trim(),
-      content: JSON.stringify(systemPageBuilder ? systemPageBuilder.getBlocks() : []),
+      content: JSON.stringify(blocks),
       custom_css: ""
     };
   }

@@ -319,11 +319,18 @@ async function saveContentBlocksSilently() {
     return { ok: true };
   }
 
+  let blocks;
+  try {
+    blocks = contentBuilder.getBlocks();
+  } catch (error) {
+    return { ok: false, error: error.message || "Помилка перевірки секцій" };
+  }
+
   const response = await fetch(`/api/task-content/${taskId}/bulk`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      blocks: contentBuilder.getBlocks()
+      blocks
     })
   });
 
