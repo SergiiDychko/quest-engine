@@ -35,6 +35,33 @@ function dbRun(sql, params = []) {
   });
 }
 
+
+function defaultPage(pageType) {
+  const defaults = {
+    START: {
+      title: "Старт гри",
+      content: "Вітаємо на грі!",
+      custom_css: ""
+    },
+    JOIN: {
+      title: "Реєстрація команди",
+      content: JSON.stringify({
+        heading: "Реєстрація команди",
+        description: "Введіть назву команди, щоб отримати посилання на гру.",
+        button_text: "Створити команду"
+      }),
+      custom_css: ""
+    },
+    FINISH: {
+      title: "Гру завершено",
+      content: "Вітаємо! Ви завершили гру.",
+      custom_css: ""
+    }
+  };
+
+  return defaults[pageType] || { title: "", content: "", custom_css: "" };
+}
+
 router.get("/catalog", requireAuth, (req, res) => {
   const user = req.session.user;
 
@@ -457,6 +484,7 @@ router.post("/:id/copy", requireAuth, async (req, res) => {
     }
 
     const winnerChanged = String(sourceGame.winner_type || "TIME").toUpperCase() !== winnerType;
+    const shouldCopyStormUnlocks = gameType === "STORM";
 
     await dbRun("BEGIN TRANSACTION");
 
@@ -488,7 +516,18 @@ router.post("/:id/copy", requireAuth, async (req, res) => {
     const newGameId = gameResult.lastID;
 
     const pages = await dbAll(`SELECT * FROM game_pages WHERE game_id = ?`, [sourceGameId]);
-    for (const page of pages) {
+    const pagesByType = new Map(pages.map(page => [page.page_type, page]));
+
+    for (const pageType of ["START", "JOIN", "FINISH"]) {
+      const sourcePage = pagesByType.get(pageType);
+      const fallbackPage = defaultPage(pageType);
+      const page = sourcePage || {
+        page_type: pageType,
+        title: fallbackPage.title,
+        content: fallbackPage.content,
+        custom_css: fallbackPage.custom_css
+      };
+
       await dbRun(
         `
         INSERT INTO game_pages (game_id, page_type, title, content, custom_css)
@@ -536,10 +575,10 @@ router.post("/:id/copy", requireAuth, async (req, res) => {
           task.required_main_answers,
           task.hide_answers_block || 0,
           winnerChanged ? 0 : (Number(task.score_points) || 0),
-          task.unlock_type || "IMMEDIATE",
-          Number(task.unlock_delay_seconds) || 0,
-          task.unlock_task_id || null,
-          task.unlock_code || null
+          shouldCopyStormUnlocks ? (task.unlock_type || "IMMEDIATE") : "IMMEDIATE",
+          shouldCopyStormUnlocks ? (Number(task.unlock_delay_seconds) || 0) : 0,
+          shouldCopyStormUnlocks && String(task.unlock_type || "").toUpperCase() === "TASK" ? (task.unlock_task_id || null) : null,
+          shouldCopyStormUnlocks && String(task.unlock_type || "").toUpperCase() === "CODE" ? (task.unlock_code || null) : null
         ]
       );
 
@@ -713,7 +752,7 @@ router.post("/:id/copy", requireAuth, async (req, res) => {
       const copiedTaskId = taskIdMap.get(Number(sourceTask.id));
       if (!copiedTaskId) continue;
 
-      if (String(sourceTask.unlock_type || "IMMEDIATE").toUpperCase() === "TASK") {
+      if (shouldCopyStormUnlocks && String(sourceTask.unlock_type || "IMMEDIATE").toUpperCase() === "TASK") {
         const mappedDependencyId = taskIdMap.get(Number(sourceTask.unlock_task_id)) || null;
         await dbRun(
           `UPDATE tasks SET unlock_task_id = ? WHERE id = ?`,

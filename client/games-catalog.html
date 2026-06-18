@@ -5,6 +5,58 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Каталог ігор</title>
   <link rel="stylesheet" href="style.css">
+
+  <style>
+    .copy-game-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(15, 23, 42, 0.45);
+    }
+
+    .copy-game-modal.visible {
+      display: flex;
+    }
+
+    .copy-game-dialog {
+      width: min(560px, 100%);
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 22px 60px rgba(15, 23, 42, 0.25);
+    }
+
+    .copy-game-dialog h2 {
+      margin-top: 0;
+    }
+
+    .copy-game-dialog label {
+      display: block;
+      margin: 12px 0;
+    }
+
+    .copy-game-dialog input,
+    .copy-game-dialog textarea,
+    .copy-game-dialog select {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 6px;
+    }
+
+    .copy-game-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+  </style>
 </head>
 <body>
   <main class="app">
@@ -50,6 +102,46 @@
       </div>
     </section>
   </main>
+
+
+  <div id="copyGameModal" class="copy-game-modal" aria-hidden="true">
+    <div class="copy-game-dialog" role="dialog" aria-modal="true" aria-labelledby="copyGameTitle">
+      <h2 id="copyGameTitle">Створити копію гри</h2>
+
+      <input id="copyGameSourceId" type="hidden">
+
+      <label>
+        Назва гри
+        <input id="copyGameNewTitle" type="text">
+      </label>
+
+      <label>
+        Короткий опис
+        <textarea id="copyGameDescription" rows="4"></textarea>
+      </label>
+
+      <label>
+        Механіка гри
+        <select id="copyGameType">
+          <option value="LINEAR">LINEAR</option>
+          <option value="STORM">STORM</option>
+        </select>
+      </label>
+
+      <label>
+        Умова перемоги
+        <select id="copyWinnerType">
+          <option value="TIME">TIME</option>
+          <option value="POINTS">POINTS</option>
+        </select>
+      </label>
+
+      <div class="copy-game-actions">
+        <button id="cancelCopyGameBtn" type="button">Скасувати</button>
+        <button id="saveCopyGameBtn" type="button">Зберегти</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     let currentUser = null;
@@ -141,7 +233,7 @@
             <button onclick="openRuns(${game.id})" type="button">Переглянути запуски</button>
           </td>
           <td>
-            <button onclick="copyGame(${game.id}, '${escapeJs(game.title)}', '${escapeJs(game.description || "")}', '${escapeJs(game.game_type)}', '${escapeJs(game.winner_type)}')" type="button">Створити копію гри</button>
+            <button onclick="openCopyGameModal(${game.id})" type="button">Створити копію гри</button>
             ${canDeleteGame(game) ? `<button onclick="deleteGame(${game.id}, '${escapeJs(game.title)}')" type="button">Видалити</button>` : ""}
           </td>
         </tr>
@@ -197,32 +289,111 @@
       await loadGames();
     }
 
-    async function copyGame(gameId, oldTitle, oldDescription, oldGameType, oldWinnerType) {
-      const title = prompt("Нова назва гри", `${oldTitle} — копія`);
-      if (!title || !title.trim()) return;
 
-      const description = prompt("Опис нової гри", oldDescription || "") || "";
-      const game_type = (prompt("Тип видачі завдань: LINEAR або STORM", oldGameType || "LINEAR") || oldGameType || "LINEAR").trim().toUpperCase();
-      const winner_type = (prompt("Умова перемоги: TIME або POINTS", oldWinnerType || "TIME") || oldWinnerType || "TIME").trim().toUpperCase();
+    function normalizeGameType(value) {
+      const type = String(value || "LINEAR").trim().toUpperCase();
+      return ["LINEAR", "STORM"].includes(type) ? type : "LINEAR";
+    }
 
-      const response = await fetch(`/api/games/${gameId}/copy`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, description, game_type, winner_type })
-      });
+    function normalizeWinnerType(value) {
+      const type = String(value || "TIME").trim().toUpperCase();
+      return ["TIME", "POINTS"].includes(type) ? type : "TIME";
+    }
 
-      const result = await response.json();
-      if (!response.ok) {
-        alert(result.error || "Помилка створення копії гри");
+    function getGameById(gameId) {
+      return allGames.find(game => Number(game.id) === Number(gameId));
+    }
+
+    function openCopyGameModal(gameId) {
+      const game = getGameById(gameId);
+
+      if (!game) {
+        alert("Гру не знайдено");
         return;
       }
 
-      window.location.href = `/game.html?id=${result.game.id}`;
+      document.getElementById("copyGameSourceId").value = game.id;
+      document.getElementById("copyGameNewTitle").value = `${game.title || ""} — копія`;
+      document.getElementById("copyGameDescription").value = game.description || "";
+      document.getElementById("copyGameType").value = normalizeGameType(game.game_type);
+      document.getElementById("copyWinnerType").value = normalizeWinnerType(game.winner_type);
+
+      const modal = document.getElementById("copyGameModal");
+      modal.classList.add("visible");
+      modal.setAttribute("aria-hidden", "false");
+      document.getElementById("copyGameNewTitle").focus();
+    }
+
+    function closeCopyGameModal() {
+      const modal = document.getElementById("copyGameModal");
+      modal.classList.remove("visible");
+      modal.setAttribute("aria-hidden", "true");
+    }
+
+    async function submitCopyGameForm() {
+      const gameId = Number(document.getElementById("copyGameSourceId").value);
+      const title = document.getElementById("copyGameNewTitle").value.trim();
+      const description = document.getElementById("copyGameDescription").value.trim();
+      const game_type = normalizeGameType(document.getElementById("copyGameType").value);
+      const winner_type = normalizeWinnerType(document.getElementById("copyWinnerType").value);
+
+      if (!gameId) {
+        alert("Не визначено гру для копіювання");
+        return;
+      }
+
+      if (!title) {
+        alert("Вкажіть назву копії гри");
+        document.getElementById("copyGameNewTitle").focus();
+        return;
+      }
+
+      const saveButton = document.getElementById("saveCopyGameBtn");
+      saveButton.disabled = true;
+      saveButton.textContent = "Збереження...";
+
+      try {
+        const response = await fetch(`/api/games/${gameId}/copy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, description, game_type, winner_type })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          alert(result.error || "Помилка створення копії гри");
+          return;
+        }
+
+        window.location.href = `/game.html?id=${result.game.id}`;
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = "Зберегти";
+      }
+    }
+
+    function setupCopyGameModal() {
+      document.getElementById("cancelCopyGameBtn").addEventListener("click", closeCopyGameModal);
+      document.getElementById("saveCopyGameBtn").addEventListener("click", submitCopyGameForm);
+
+      document.getElementById("copyGameModal").addEventListener("click", event => {
+        if (event.target.id === "copyGameModal") {
+          closeCopyGameModal();
+        }
+      });
+
+      document.addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+          closeCopyGameModal();
+        }
+      });
     }
 
     async function init() {
       await checkAuth();
       setupFilters();
+      setupCopyGameModal();
       await loadGames();
     }
 
