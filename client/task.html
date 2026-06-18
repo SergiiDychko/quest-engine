@@ -91,9 +91,6 @@
       <h2>Конструктор контенту завдання</h2>
       <p class="muted-text">Додайте текст, зображення, відео, аудіо або власний HTML/CSS/JS. Порядок блоків можна змінювати кнопками ↑ та ↓.</p>
       <div id="contentBuilder">Завантаження...</div>
-      <div class="save-row builder-preview-row">
-        <button id="previewTaskContentBtn" type="button">Попередній перегляд</button>
-      </div>
     </section>
 
     <section id="codesTab" class="tab-panel hidden">
@@ -218,11 +215,7 @@ function isScoreModeValue(value) {
 
 document.querySelectorAll(".tab-btn").forEach(button => {
   button.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
-    document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.add("hidden"));
-
-    button.classList.add("active");
-    document.getElementById(button.dataset.tab).classList.remove("hidden");
+    activateTab(button.dataset.tab);
   });
 });
 
@@ -476,15 +469,18 @@ async function saveContentBlocksSilently() {
   return { ok: true };
 }
 
-document.getElementById("previewTaskContentBtn").addEventListener("click", () => {
-  if (!contentBuilder) return;
+const previewTaskContentBtn = document.getElementById("previewTaskContentBtn");
+if (previewTaskContentBtn) {
+  previewTaskContentBtn.addEventListener("click", () => {
+    if (!contentBuilder) return;
 
-  const title = currentTask
-    ? (String(currentTask.title || "").trim() ? `Завдання ${currentTask.sort_order}. ${currentTask.title}` : `Завдання ${currentTask.sort_order}.`)
-    : "Попередній перегляд завдання";
+    const title = currentTask
+      ? (String(currentTask.title || "").trim() ? `Завдання ${currentTask.sort_order}. ${currentTask.title}` : `Завдання ${currentTask.sort_order}.`)
+      : "Попередній перегляд завдання";
 
-  contentBuilder.openPreview(title);
-});
+    contentBuilder.openPreview(title);
+  });
+}
 
 function openTaskPreviewDocument(title, bodyHtml) {
   const preview = window.open("", "_blank");
@@ -2022,9 +2018,13 @@ function renderStormUnlockEditor() {
   const stormPanel = document.getElementById("stormTab");
 
   if (stormButton) stormButton.classList.toggle("hidden", !isStormGame);
-  if (stormPanel) stormPanel.classList.toggle("hidden", !isStormGame && stormPanel.classList.contains("active"));
+  if (!isStormGame) {
+    if (stormPanel) stormPanel.classList.add("hidden");
+    if (stormButton?.classList.contains("active")) activateTab("contentTab");
+    return;
+  }
 
-  if (!isStormGame || !currentTask) return;
+  if (!currentTask) return;
 
   const unlockType = String(currentTask.unlock_type || "IMMEDIATE").toUpperCase();
   const typeSelect = document.getElementById("stormUnlockType");
