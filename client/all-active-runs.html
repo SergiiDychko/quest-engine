@@ -45,6 +45,31 @@
         .replaceAll(">", "&gt;");
     }
 
+    function getRunStatusPriority(status) {
+      const normalized = String(status || "").trim().toUpperCase();
+
+      if (normalized === "ACTIVE") return 1;
+      if (normalized === "DRAFT") return 2;
+
+      return 3;
+    }
+
+    function sortRuns(runs) {
+      return [...runs].sort((a, b) => {
+        const priorityA = getRunStatusPriority(a.status);
+        const priorityB = getRunStatusPriority(b.status);
+
+        if (priorityA !== priorityB) {
+          return priorityA - priorityB;
+        }
+
+        const startA = new Date(a.started_at).getTime();
+        const startB = new Date(b.started_at).getTime();
+
+        return startA - startB;
+      });
+    }
+
     async function checkAuth() {
       const response = await fetch("/api/auth/me");
       const result = await response.json();
@@ -64,7 +89,7 @@
         return;
       }
 
-      const runs = result.runs || [];
+      const runs = sortRuns(result.runs || []);
 
       if (!runs.length) {
         tableBody.innerHTML = '<tr><td colspan="6">Актуальних запусків поки немає.</td></tr>';
@@ -72,8 +97,8 @@
       }
 
       tableBody.innerHTML = runs.map(run => `
-        <tr>
-          <td onclick="openRun(${run.id})" style="cursor:pointer">
+        <tr class="clickable-row">
+          <td onclick="openRun(${run.id})">
             ${escapeHtml(run.title)}
           </td>
           <td>${escapeHtml(run.game_title)}</td>

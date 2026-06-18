@@ -31,8 +31,90 @@ function buildPublicStatisticsUrl(req, runCode) {
   return `${req.protocol}://${req.get("host")}/public-statistics.html?run=${runCode}`;
 }
 
+function dbRunAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function(error) {
+      if (error) reject(error);
+      else resolve({ changes: this.changes, lastID: this.lastID });
+    });
+  });
+}
 
-router.get("/active", requireAuth, (req, res) => {
+async function finalizeRunData(runId) {
+  await dbRunAsync(`
+    UPDATE teams
+    SET finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP)
+    WHERE run_id = ?
+  `, [runId]);
+
+  await dbRunAsync(`
+    UPDATE team_tasks
+    SET completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
+        auto_transition = CASE WHEN completed_at IS NULL THEN 1 ELSE auto_transition END
+    WHERE team_id IN (SELECT id FROM teams WHERE run_id = ?)
+  `, [runId]);
+
+  await dbRunAsync(`
+    INSERT INTO team_tasks (team_id, task_id, opened_at, completed_at, auto_transition)
+    SELECT
+      teams.id,
+      tasks.id,
+      COALESCE(game_runs.started_at, teams.created_at, CURRENT_TIMESTAMP),
+      CURRENT_TIMESTAMP,
+      1
+    FROM teams
+    JOIN game_runs ON game_runs.id = teams.run_id
+    JOIN tasks ON tasks.game_id = game_runs.game_id
+    LEFT JOIN team_tasks
+      ON team_tasks.team_id = teams.id
+      AND team_tasks.task_id = tasks.id
+    WHERE teams.run_id = ?
+      AND team_tasks.id IS NULL
+  `, [runId]);
+}
+
+async function syncRunStatuses() {
+  await dbRunAsync(`
+    UPDATE game_runs
+    SET status = 'ACTIVE'
+    WHERE status = 'DRAFT'
+      AND started_at IS NOT NULL
+      AND datetime(started_at) <= datetime('now')
+  `);
+
+  const expiredRuns = await new Promise((resolve, reject) => {
+    db.all(`
+      SELECT id
+      FROM game_runs
+      WHERE status = 'ACTIVE'
+        AND finished_at IS NOT NULL
+        AND datetime(finished_at) <= datetime('now')
+    `, [], (error, rows) => error ? reject(error) : resolve(rows || []));
+  });
+
+  for (const run of expiredRuns) {
+    await finalizeRunData(run.id);
+  }
+
+  await dbRunAsync(`
+    UPDATE game_runs
+    SET status = 'ARCHIVED',
+        finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP)
+    WHERE status = 'ACTIVE'
+      AND finished_at IS NOT NULL
+      AND datetime(finished_at) <= datetime('now')
+  `);
+}
+
+function syncStatusesMiddleware(req, res, next) {
+  syncRunStatuses()
+    .then(() => next())
+    .catch(() => next());
+}
+
+
+
+router.get("/active", requireAuth, syncStatusesMiddleware, (req, res) => {
   db.all(
     `
     SELECT
@@ -143,7 +225,7 @@ router.post("/", requireAuth, (req, res) => {
   );
 });
 
-router.get("/game/:gameId", requireAuth, (req, res) => {
+router.get("/game/:gameId", requireAuth, syncStatusesMiddleware, (req, res) => {
   const gameId = req.params.gameId;
 
   db.all(
@@ -235,7 +317,7 @@ router.post("/game/:gameId", requireAuth, (req, res) => {
   );
 });
 
-router.get("/archive/game/:gameId", requireAuth, (req, res) => {
+router.get("/archive/game/:gameId", requireAuth, syncStatusesMiddleware, (req, res) => {
   const gameId = req.params.gameId;
 
   db.all(
@@ -265,7 +347,7 @@ router.get("/archive/game/:gameId", requireAuth, (req, res) => {
 });
 
 
-router.get("/archive", requireAuth, (req, res) => {
+router.get("/archive", requireAuth, syncStatusesMiddleware, (req, res) => {
   db.all(
     `
     SELECT
@@ -293,7 +375,7 @@ router.get("/archive", requireAuth, (req, res) => {
   );
 });
 
-router.get("/:id", requireAuth, (req, res) => {
+router.get("/:id", requireAuth, syncStatusesMiddleware, (req, res) => {
   const runId = req.params.id;
 
   db.get(
@@ -403,6 +485,8 @@ router.post("/:id/publish", requireAuth, (req, res) => {
               error: "Помилка публікації статистики"
             });
           }
+
+          finalizeRunData(runId).catch(() => {});
 
           const publicStatisticsUrl =
             buildPublicStatisticsUrl(req, run.run_code);
@@ -521,62 +605,100 @@ router.delete("/:runId/teams/:teamId", requireAuth, (req, res) => {
 router.delete("/:id", requireAuth, (req, res) => {
   const runId = req.params.id;
 
-  db.run(
-    `DELETE FROM game_runs WHERE id = ?`,
-    [runId],
-    function(error) {
-      if (error) {
-        return res.status(500).json({
-          error: "Помилка видалення запуску"
-        });
+  db.serialize(() => {
+    db.run("BEGIN TRANSACTION");
+
+    db.all(`SELECT id FROM teams WHERE run_id = ?`, [runId], (teamError, teams) => {
+      if (teamError) {
+        db.run("ROLLBACK");
+        return res.status(500).json({ error: "Помилка видалення запуску" });
       }
 
-      res.json({
-        message: "Запуск видалено"
-      });
-    }
-  );
+      const teamIds = (teams || []).map(team => Number(team.id)).filter(Boolean);
+      const placeholders = teamIds.map(() => "?").join(",");
+
+      const afterTeamDataDeleted = () => {
+        db.run(`DELETE FROM messages WHERE run_id = ?`, [runId]);
+        db.run(`DELETE FROM run_pages WHERE run_id = ?`, [runId]);
+        db.run(`DELETE FROM run_moderators WHERE run_id = ?`, [runId]);
+        db.run(`DELETE FROM teams WHERE run_id = ?`, [runId]);
+        db.run(`DELETE FROM game_runs WHERE id = ?`, [runId], function(error) {
+          if (error) {
+            db.run("ROLLBACK");
+            return res.status(500).json({ error: "Помилка видалення запуску" });
+          }
+          db.run("COMMIT");
+          res.json({ message: "Запуск видалено" });
+        });
+      };
+
+      if (!teamIds.length) {
+        afterTeamDataDeleted();
+        return;
+      }
+
+      db.run(`DELETE FROM team_answers WHERE team_id IN (${placeholders})`, teamIds);
+      db.run(`DELETE FROM team_found_answers WHERE team_id IN (${placeholders})`, teamIds);
+      db.run(`DELETE FROM team_time_adjustments WHERE team_id IN (${placeholders})`, teamIds);
+      db.run(`DELETE FROM team_tasks WHERE team_id IN (${placeholders})`, teamIds);
+      db.run(`DELETE FROM team_hint_purchases WHERE team_id IN (${placeholders})`, teamIds);
+      db.run(`DELETE FROM team_multitask_hint_purchases WHERE team_id IN (${placeholders})`, teamIds);
+      db.run(`DELETE FROM team_score_events WHERE team_id IN (${placeholders})`, teamIds);
+      db.run(`DELETE FROM messages WHERE team_id IN (${placeholders}) OR sender_team_id IN (${placeholders})`, [...teamIds, ...teamIds]);
+      afterTeamDataDeleted();
+    });
+  });
 });
 
-router.put("/:id", requireAuth, (req, res) => {
+router.put("/:id", requireAuth, syncStatusesMiddleware, (req, res) => {
   const runId = req.params.id;
 
-  const {
-    title,
-    status,
-    started_at,
-    finished_at
-  } = req.body;
+  const { title, status, started_at, finished_at } = req.body;
+  const nextStatus = String(status || "DRAFT").toUpperCase();
 
-  db.run(
-    `
-    UPDATE game_runs
-    SET
-      title = ?,
-      status = ?,
-      started_at = ?,
-      finished_at = ?
-    WHERE id = ?
-    `,
-    [
-      title,
-      status,
-      started_at,
-      finished_at,
-      runId
-    ],
-    function(error) {
-      if (error) {
-        return res.status(500).json({
-          error: "Помилка оновлення запуску"
-        });
-      }
+  if (!["DRAFT", "ACTIVE", "ARCHIVED"].includes(nextStatus)) {
+    return res.status(400).json({ error: "Некоректний статус запуску" });
+  }
 
-      res.json({
-        message: "Запуск оновлено"
-      });
+  db.get(`SELECT status FROM game_runs WHERE id = ?`, [runId], (selectError, existingRun) => {
+    if (selectError) {
+      return res.status(500).json({ error: "Помилка оновлення запуску" });
     }
-  );
+    if (!existingRun) {
+      return res.status(404).json({ error: "Запуск не знайдено" });
+    }
+    if (existingRun.status === "ARCHIVED" && nextStatus !== "ARCHIVED") {
+      return res.status(400).json({ error: "Архівний запуск не можна повернути в активний стан" });
+    }
+
+    const normalizedFinishedAt = nextStatus === "ARCHIVED"
+      ? (finished_at || new Date().toISOString().slice(0, 19).replace("T", " "))
+      : (finished_at || null);
+
+    db.run(
+      `
+      UPDATE game_runs
+      SET
+        title = ?,
+        status = ?,
+        started_at = ?,
+        finished_at = ?
+      WHERE id = ?
+      `,
+      [title, nextStatus, started_at || null, normalizedFinishedAt, runId],
+      function(error) {
+        if (error) {
+          return res.status(500).json({ error: "Помилка оновлення запуску" });
+        }
+
+        if (nextStatus === "ARCHIVED") {
+          finalizeRunData(runId).catch(() => {});
+        }
+
+        res.json({ message: "Запуск оновлено" });
+      }
+    );
+  });
 });
 
 module.exports = router;

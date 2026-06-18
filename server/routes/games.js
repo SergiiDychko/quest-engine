@@ -1,5 +1,6 @@
 const express = require("express");
 const db = require("../database");
+const bcrypt = require("bcrypt");
 
 const router = express.Router();
 
@@ -43,6 +44,7 @@ router.get("/catalog", requireAuth, (req, res) => {
       games.title,
       games.description,
       games.status,
+      games.created_by,
       games.game_type,
       games.winner_type,
       COUNT(tasks.id) AS tasks_count
@@ -61,6 +63,7 @@ router.get("/catalog", requireAuth, (req, res) => {
         games.title,
         games.description,
         games.status,
+        games.created_by,
         games.game_type,
         games.winner_type,
         COUNT(tasks.id) AS tasks_count
@@ -337,6 +340,90 @@ router.post("/:id/tasks", requireAuth, (req, res) => {
   );
 });
 
+
+
+router.delete("/:id", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.id);
+  const password = String(req.body?.password || "");
+  const user = req.session.user;
+
+  if (!gameId) {
+    return res.status(400).json({ error: "Некоректна гра" });
+  }
+
+  if (!password) {
+    return res.status(400).json({ error: "Введіть пароль для підтвердження" });
+  }
+
+  try {
+    const dbUser = await dbGet(`SELECT id, password_hash, role FROM users WHERE id = ?`, [user.id]);
+    if (!dbUser) {
+      return res.status(401).json({ error: "Користувача не знайдено" });
+    }
+
+    const passwordOk = await bcrypt.compare(password, dbUser.password_hash);
+    if (!passwordOk) {
+      return res.status(401).json({ error: "Невірний пароль" });
+    }
+
+    const game = await dbGet(`SELECT id, created_by FROM games WHERE id = ?`, [gameId]);
+    if (!game) {
+      return res.status(404).json({ error: "Гру не знайдено" });
+    }
+
+    if (user.role !== "ADMIN" && Number(game.created_by) !== Number(user.id)) {
+      return res.status(403).json({ error: "Недостатньо прав для видалення цієї гри" });
+    }
+
+    await dbRun("BEGIN TRANSACTION");
+
+    const runs = await dbAll(`SELECT id FROM game_runs WHERE game_id = ?`, [gameId]);
+    for (const run of runs) {
+      const runId = Number(run.id);
+      const teams = await dbAll(`SELECT id FROM teams WHERE run_id = ?`, [runId]);
+      const teamIds = teams.map(team => Number(team.id)).filter(Boolean);
+      if (teamIds.length) {
+        const placeholders = teamIds.map(() => "?").join(",");
+        await dbRun(`DELETE FROM team_answers WHERE team_id IN (${placeholders})`, teamIds);
+        await dbRun(`DELETE FROM team_found_answers WHERE team_id IN (${placeholders})`, teamIds);
+        await dbRun(`DELETE FROM team_time_adjustments WHERE team_id IN (${placeholders})`, teamIds);
+        await dbRun(`DELETE FROM team_tasks WHERE team_id IN (${placeholders})`, teamIds);
+        await dbRun(`DELETE FROM team_hint_purchases WHERE team_id IN (${placeholders})`, teamIds);
+        await dbRun(`DELETE FROM team_multitask_hint_purchases WHERE team_id IN (${placeholders})`, teamIds);
+        await dbRun(`DELETE FROM team_score_events WHERE team_id IN (${placeholders})`, teamIds);
+        await dbRun(`DELETE FROM messages WHERE team_id IN (${placeholders}) OR sender_team_id IN (${placeholders})`, [...teamIds, ...teamIds]);
+      }
+      await dbRun(`DELETE FROM messages WHERE run_id = ?`, [runId]);
+      await dbRun(`DELETE FROM run_pages WHERE run_id = ?`, [runId]);
+      await dbRun(`DELETE FROM run_moderators WHERE run_id = ?`, [runId]);
+      await dbRun(`DELETE FROM teams WHERE run_id = ?`, [runId]);
+      await dbRun(`DELETE FROM game_runs WHERE id = ?`, [runId]);
+    }
+
+    const tasks = await dbAll(`SELECT id FROM tasks WHERE game_id = ?`, [gameId]);
+    for (const task of tasks) {
+      const taskId = Number(task.id);
+      await dbRun(`DELETE FROM task_content WHERE task_id = ?`, [taskId]);
+      await dbRun(`DELETE FROM task_hints WHERE task_id = ?`, [taskId]);
+      await dbRun(`DELETE FROM multitask_settings WHERE task_id = ?`, [taskId]);
+      await dbRun(`DELETE FROM multitask_subtasks WHERE task_id = ?`, [taskId]);
+      await dbRun(`DELETE FROM olympiad_settings WHERE task_id = ?`, [taskId]);
+      await dbRun(`DELETE FROM olympiad_cells WHERE task_id = ?`, [taskId]);
+      await dbRun(`DELETE FROM task_answers WHERE task_id = ?`, [taskId]);
+    }
+
+    await dbRun(`DELETE FROM tasks WHERE game_id = ?`, [gameId]);
+    await dbRun(`DELETE FROM game_pages WHERE game_id = ?`, [gameId]);
+    await dbRun(`DELETE FROM game_permissions WHERE game_id = ?`, [gameId]);
+    await dbRun(`DELETE FROM games WHERE id = ?`, [gameId]);
+
+    await dbRun("COMMIT");
+    res.json({ message: "Гру видалено" });
+  } catch (error) {
+    try { await dbRun("ROLLBACK"); } catch (rollbackError) {}
+    res.status(500).json({ error: "Помилка видалення гри" });
+  }
+});
 
 router.post("/:id/copy", requireAuth, async (req, res) => {
   const sourceGameId = req.params.id;

@@ -5,12 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Реєстрація команди</title>
   <link rel="stylesheet" href="style.css">
+  <style>
+    .start-countdown {
+      margin: 0 0 24px;
+      padding: 14px 18px;
+      border: 2px solid #cbd5e1;
+      border-radius: 12px;
+      background: #f8fafc;
+      color: #1f2937;
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+  </style>
 </head>
 <body>
 
 <div class="app player-service-page">
   <div id="startPageBlock" class="card hidden">
     <h1 id="startPageTitle">Гра ще не почалась</h1>
+    <div
+      id="startCountdown"
+      class="start-countdown hidden"
+      aria-live="polite"
+    ></div>
     <div id="startPageContent" class="task-content"></div>
   </div>
 
@@ -75,6 +93,7 @@ const runCode = params.get("run");
 let currentRun = null;
 let currentPlayLink = "";
 let currentRegistrationSettings = null;
+let startCountdownTimer = null;
 
 function escapeHtml(text) {
   return String(text || "")
@@ -83,6 +102,69 @@ function escapeHtml(text) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
 }
+
+function parseRunDate(value) {
+  if (!value) return null;
+
+  const normalized = String(value).trim().replace(" ", "T");
+  const iso = /Z$|[+-]\d\d:?\d\d$/.test(normalized)
+    ? normalized
+    : `${normalized}Z`;
+  const date = new Date(iso);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDuration(totalSeconds) {
+  const safeSeconds = Math.max(0, Number(totalSeconds || 0));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+
+  return [hours, minutes, seconds]
+    .map(value => String(value).padStart(2, "0"))
+    .join(":");
+}
+
+function stopStartCountdown() {
+  if (startCountdownTimer) {
+    clearInterval(startCountdownTimer);
+    startCountdownTimer = null;
+  }
+
+  const countdown = document.getElementById("startCountdown");
+  if (countdown) {
+    countdown.classList.add("hidden");
+    countdown.textContent = "";
+  }
+}
+
+function startStartCountdown(startedAt) {
+  stopStartCountdown();
+
+  const startDate = parseRunDate(startedAt);
+  const countdown = document.getElementById("startCountdown");
+
+  if (!startDate || !countdown) return;
+
+  function renderCountdown() {
+    const remainingSeconds = Math.ceil((startDate.getTime() - Date.now()) / 1000);
+
+    if (remainingSeconds <= 0) {
+      countdown.textContent = "До старту гри залишилось: 00:00:00";
+      stopStartCountdown();
+      window.location.reload();
+      return;
+    }
+
+    countdown.classList.remove("hidden");
+    countdown.textContent = `До старту гри залишилось: ${formatDuration(remainingSeconds)}`;
+  }
+
+  renderCountdown();
+  startCountdownTimer = setInterval(renderCountdown, 1000);
+}
+
 
 function showOnly(id) {
   document.getElementById("startPageBlock").classList.add("hidden");
@@ -132,7 +214,7 @@ function parseRegistrationSettings(page) {
   return fallback;
 }
 
-function renderStartPage(page) {
+function renderStartPage(page, run) {
   const title = page?.title || "Гра ще не почалась";
   const blocks = parseBlocks(page?.content);
 
@@ -143,10 +225,12 @@ function renderStartPage(page) {
       : `<p>Гра ще не почалась. Спробуйте оновити сторінку пізніше.</p>`;
 
   QEContentRenderer.resizeHtmlFrames(document.getElementById("startPageContent"));
+  startStartCountdown(run?.started_at);
   showOnly("startPageBlock");
 }
 
 function renderRegistrationPage(page) {
+  stopStartCountdown();
   currentRegistrationSettings = parseRegistrationSettings(page);
 
   document.getElementById("registrationTitle").textContent =
@@ -175,7 +259,7 @@ async function loadRun() {
   currentRun = result.run;
 
   if (result.status === "WAITING") {
-    renderStartPage(result.page);
+    renderStartPage(result.page, currentRun);
     return;
   }
 

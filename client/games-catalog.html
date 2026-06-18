@@ -13,6 +13,21 @@
 
       <h1>Каталог ігор</h1>
 
+      <div class="catalog-filters info-block">
+        <div class="filter-row">
+          <strong>Механіка:</strong>
+          <button type="button" class="filter-btn active" data-mechanic-filter="ALL">Усі</button>
+          <button type="button" class="filter-btn" data-mechanic-filter="LINEAR">LINEAR</button>
+          <button type="button" class="filter-btn" data-mechanic-filter="STORM">STORM</button>
+        </div>
+        <div class="filter-row">
+          <strong>Умова перемоги:</strong>
+          <button type="button" class="filter-btn active" data-winner-filter="ALL">Усі</button>
+          <button type="button" class="filter-btn" data-winner-filter="TIME">TIME</button>
+          <button type="button" class="filter-btn" data-winner-filter="POINTS">POINTS</button>
+        </div>
+      </div>
+
       <div class="info-block">
         <table class="codes-table">
           <thead>
@@ -37,6 +52,11 @@
   </main>
 
   <script>
+    let currentUser = null;
+    let allGames = [];
+    let selectedMechanicFilter = "ALL";
+    let selectedWinnerFilter = "ALL";
+
     function escapeHtml(text) {
       return String(text || "")
         .replaceAll("&", "&amp;")
@@ -59,7 +79,10 @@
 
       if (!response.ok || !result.user) {
         window.location.href = "/login.html";
+        return;
       }
+
+      currentUser = result.user;
     }
 
     async function loadGames() {
@@ -72,30 +95,75 @@
         return;
       }
 
-      const games = result.games || [];
+      allGames = result.games || [];
+      renderGames();
+    }
 
-      if (!games.length) {
+
+    function getFilteredGames() {
+      return allGames.filter(game => {
+        const mechanic = String(game.game_type || "LINEAR").toUpperCase();
+        const winner = String(game.winner_type || "TIME").toUpperCase();
+        return (selectedMechanicFilter === "ALL" || mechanic === selectedMechanicFilter)
+          && (selectedWinnerFilter === "ALL" || winner === selectedWinnerFilter);
+      });
+    }
+
+    function canDeleteGame(game) {
+      if (!currentUser) return false;
+      return currentUser.role === "ADMIN" || Number(game.created_by) === Number(currentUser.id);
+    }
+
+    function renderGames() {
+      const tableBody = document.getElementById("gamesTableBody");
+      const games = getFilteredGames();
+
+      if (!allGames.length) {
         tableBody.innerHTML = '<tr><td colspan="7">Ігор поки немає.</td></tr>';
         return;
       }
 
+      if (!games.length) {
+        tableBody.innerHTML = '<tr><td colspan="7">Немає ігор за обраними фільтрами.</td></tr>';
+        return;
+      }
+
       tableBody.innerHTML = games.map(game => `
-        <tr>
-          <td onclick="openGame(${game.id})" style="cursor:pointer">
+        <tr class="clickable-row">
+          <td onclick="openGame(${game.id})">
             <strong>${escapeHtml(game.title)}</strong>
           </td>
-          <td>${escapeHtml(game.game_type)}</td>
-          <td>${escapeHtml(game.winner_type)}</td>
-          <td>${Number(game.tasks_count || 0)}</td>
-          <td>${escapeHtml(game.status)}</td>
+          <td onclick="openGame(${game.id})">${escapeHtml(game.game_type)}</td>
+          <td onclick="openGame(${game.id})">${escapeHtml(game.winner_type)}</td>
+          <td onclick="openGame(${game.id})">${Number(game.tasks_count || 0)}</td>
+          <td onclick="openGame(${game.id})">${escapeHtml(game.status)}</td>
           <td>
             <button onclick="openRuns(${game.id})" type="button">Переглянути запуски</button>
           </td>
           <td>
             <button onclick="copyGame(${game.id}, '${escapeJs(game.title)}', '${escapeJs(game.description || "")}', '${escapeJs(game.game_type)}', '${escapeJs(game.winner_type)}')" type="button">Створити копію гри</button>
+            ${canDeleteGame(game) ? `<button onclick="deleteGame(${game.id}, '${escapeJs(game.title)}')" type="button">Видалити</button>` : ""}
           </td>
         </tr>
       `).join("");
+    }
+
+    function setupFilters() {
+      document.querySelectorAll("[data-mechanic-filter]").forEach(button => {
+        button.addEventListener("click", () => {
+          selectedMechanicFilter = button.dataset.mechanicFilter;
+          document.querySelectorAll("[data-mechanic-filter]").forEach(item => item.classList.toggle("active", item === button));
+          renderGames();
+        });
+      });
+
+      document.querySelectorAll("[data-winner-filter]").forEach(button => {
+        button.addEventListener("click", () => {
+          selectedWinnerFilter = button.dataset.winnerFilter;
+          document.querySelectorAll("[data-winner-filter]").forEach(item => item.classList.toggle("active", item === button));
+          renderGames();
+        });
+      });
     }
 
     function openGame(gameId) {
@@ -104,6 +172,29 @@
 
     function openRuns(gameId) {
       window.location.href = `/runs.html?id=${gameId}`;
+    }
+
+
+    async function deleteGame(gameId, title) {
+      const confirmed = confirm(`Видалити гру "${title}"?\n\nЦе видалить гру, її завдання, запуски та статистику. Дію неможливо скасувати.`);
+      if (!confirmed) return;
+
+      const password = prompt("Введіть свій пароль для підтвердження видалення гри");
+      if (!password) return;
+
+      const response = await fetch(`/api/games/${gameId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        alert(result.error || "Помилка видалення гри");
+        return;
+      }
+
+      await loadGames();
     }
 
     async function copyGame(gameId, oldTitle, oldDescription, oldGameType, oldWinnerType) {
@@ -131,6 +222,7 @@
 
     async function init() {
       await checkAuth();
+      setupFilters();
       await loadGames();
     }
 

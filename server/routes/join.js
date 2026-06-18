@@ -75,6 +75,27 @@ function parseUtcDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+
+function normalizeRunLifecycle(run) {
+  if (!run) return run;
+  const now = new Date();
+  const startDate = parseUtcDate(run.started_at);
+  const finishDate = parseUtcDate(run.finished_at);
+
+  if (run.status === "DRAFT" && startDate && now >= startDate) {
+    run.status = "ACTIVE";
+    db.run(`UPDATE game_runs SET status = 'ACTIVE' WHERE id = ? AND status = 'DRAFT'`, [run.id]);
+  }
+
+  if (run.status === "ACTIVE" && finishDate && now >= finishDate) {
+    run.status = "ARCHIVED";
+    db.run(`UPDATE game_runs SET status = 'ARCHIVED', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP) WHERE id = ?`, [run.id]);
+    db.run(`UPDATE teams SET finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP) WHERE run_id = ?`, [run.id]);
+  }
+
+  return run;
+}
+
 function isRunWaiting(run) {
   const startDate = parseUtcDate(run.started_at);
   return Boolean(startDate && new Date() < startDate);
@@ -153,6 +174,7 @@ router.get("/:runCode", (req, res) => {
       game_runs.run_code,
       game_runs.status,
       game_runs.started_at,
+      game_runs.finished_at,
       games.title AS game_title
     FROM game_runs
     JOIN games ON games.id = game_runs.game_id
@@ -166,6 +188,12 @@ router.get("/:runCode", (req, res) => {
 
       if (!run) {
         return res.status(404).json({ error: "Запуск не знайдено" });
+      }
+
+      normalizeRunLifecycle(run);
+
+      if (run.status === "ARCHIVED") {
+        return res.status(403).json({ error: "Цей запуск уже в архіві" });
       }
 
       const pageType = isRunWaiting(run) ? "START" : "JOIN";
@@ -196,7 +224,7 @@ router.post("/:runCode", (req, res) => {
   }
 
   db.get(
-    `SELECT id, game_id, started_at FROM game_runs WHERE run_code = ?`,
+    `SELECT id, game_id, status, started_at, finished_at FROM game_runs WHERE run_code = ?`,
     [runCode],
     (runError, run) => {
       if (runError) {
@@ -205,6 +233,12 @@ router.post("/:runCode", (req, res) => {
 
       if (!run) {
         return res.status(404).json({ error: "Запуск не знайдено" });
+      }
+
+      normalizeRunLifecycle(run);
+
+      if (run.status === "ARCHIVED") {
+        return res.status(403).json({ error: "Цей запуск уже в архіві" });
       }
 
       if (isRunWaiting(run)) {

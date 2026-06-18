@@ -24,12 +24,13 @@
             <th>Завершення</th>
             <th>Статус</th>
             <th>Статистика</th>
+            <th>Дії</th>
           </tr>
         </thead>
 
         <tbody id="archiveRunsTableBody">
           <tr>
-            <td colspan="5">Завантаження...</td>
+            <td colspan="6">Завантаження...</td>
           </tr>
         </tbody>
       </table>
@@ -69,7 +70,7 @@ async function loadArchiveRuns() {
   if (!gameId) {
     tableBody.innerHTML = `
       <tr>
-        <td colspan="5">Не вказано гру</td>
+        <td colspan="6">Не вказано гру</td>
       </tr>
     `;
     return;
@@ -81,7 +82,7 @@ async function loadArchiveRuns() {
   if (!response.ok) {
     tableBody.innerHTML = `
       <tr>
-        <td colspan="5">
+        <td colspan="6">
           ${escapeHtml(result.error || "Помилка завантаження архіву")}
         </td>
       </tr>
@@ -92,15 +93,15 @@ async function loadArchiveRuns() {
   if (!result.runs.length) {
     tableBody.innerHTML = `
       <tr>
-        <td colspan="5">Архівних запусків поки немає</td>
+        <td colspan="6">Архівних запусків поки немає</td>
       </tr>
     `;
     return;
   }
 
   tableBody.innerHTML = result.runs.map(run => `
-    <tr>
-      <td>${escapeHtml(run.title)}</td>
+    <tr class="clickable-row">
+      <td onclick="openRun(${run.id})">${escapeHtml(run.title)}</td>
       <td>${escapeHtml(QETime.formatLocalDateTimeForList(run.started_at))}</td>
       <td>${escapeHtml(QETime.formatLocalDateTimeForList(run.finished_at))}</td>
       <td>${escapeHtml(run.status)}</td>
@@ -109,12 +110,36 @@ async function loadArchiveRuns() {
           Статистика
         </button>
       </td>
+      <td>
+        <button onclick="deleteRun(${run.id})">
+          Видалити
+        </button>
+      </td>
     </tr>
   `).join("");
 }
 
+function openRun(runId) {
+  window.location.href = `/run.html?id=${runId}`;
+}
+
 function openStatistics(runId) {
   window.open(`/statistics.html?run=${runId}`, "_blank", "noopener");
+}
+
+async function deleteRun(runId) {
+  const confirmed = confirm("Видалити цей архівний запуск?");
+  if (!confirmed) return;
+
+  const response = await fetch(`/api/runs/${runId}`, { method: "DELETE" });
+  const result = await response.json();
+
+  if (!response.ok) {
+    alert(result.error || "Помилка видалення");
+    return;
+  }
+
+  loadArchiveRuns();
 }
 
 loadGameTitle();

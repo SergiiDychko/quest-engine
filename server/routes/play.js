@@ -419,6 +419,47 @@ function parseUtcDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+
+function normalizeRunStatusForPlay(gameData) {
+  if (!gameData) return gameData;
+
+  const now = new Date();
+
+  if (gameData.run_status === "DRAFT" && gameData.started_at) {
+    const startDate = parseUtcDate(gameData.started_at);
+    if (startDate && now >= startDate) {
+      gameData.run_status = "ACTIVE";
+      db.run(`UPDATE game_runs SET status = 'ACTIVE' WHERE id = ? AND status = 'DRAFT'`, [gameData.run_id]);
+    }
+  }
+
+  if (gameData.run_status === "ACTIVE" && gameData.run_finished_at) {
+    const finishDate = parseUtcDate(gameData.run_finished_at);
+    if (finishDate && now >= finishDate) {
+      gameData.run_status = "ARCHIVED";
+      db.run(`UPDATE game_runs SET status = 'ARCHIVED', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP) WHERE id = ?`, [gameData.run_id]);
+      db.run(`UPDATE teams SET finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP) WHERE run_id = ?`, [gameData.run_id]);
+      db.run(`
+        UPDATE team_tasks
+        SET completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
+            auto_transition = CASE WHEN completed_at IS NULL THEN 1 ELSE auto_transition END
+        WHERE team_id IN (SELECT id FROM teams WHERE run_id = ?)
+      `, [gameData.run_id]);
+      db.run(`
+        INSERT INTO team_tasks (team_id, task_id, opened_at, completed_at, auto_transition)
+        SELECT teams.id, tasks.id, COALESCE(game_runs.started_at, teams.created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, 1
+        FROM teams
+        JOIN game_runs ON game_runs.id = teams.run_id
+        JOIN tasks ON tasks.game_id = game_runs.game_id
+        LEFT JOIN team_tasks ON team_tasks.team_id = teams.id AND team_tasks.task_id = tasks.id
+        WHERE teams.run_id = ? AND team_tasks.id IS NULL
+      `, [gameData.run_id]);
+    }
+  }
+
+  return gameData;
+}
+
 function getGameDataByPin(pin, callback) {
   db.get(
     `
@@ -1023,6 +1064,8 @@ router.get("/:pin", (req, res) => {
       });
     }
 
+    normalizeRunStatusForPlay(gameData);
+
     if (gameData.run_status === "ARCHIVED") {
       return getGamePage(gameData.game_id, "FINISH", (pageError, page) => {
         if (pageError) {
@@ -1234,6 +1277,8 @@ router.put("/:pin/team-name", (req, res) => {
       });
     }
 
+    normalizeRunStatusForPlay(gameData);
+
     if (gameData.run_status === "ARCHIVED") {
       return res.status(403).json({
         error: "Цей запуск уже в архіві"
@@ -1336,6 +1381,8 @@ router.post("/:pin/answer", async (req, res) => {
         error: "Команду не знайдено"
       });
     }
+
+    normalizeRunStatusForPlay(gameData);
 
     if (gameData.run_status === "ARCHIVED") {
       return res.status(403).json({

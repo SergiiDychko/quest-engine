@@ -20,11 +20,7 @@
 
       <label>
         Назва запуску
-        <input
-          id="newRunTitle"
-          type="text"
-          placeholder="Наприклад: Ajax Systems Summer Quest"
-        >
+        <input id="newRunTitle" type="text" placeholder="Наприклад: Ajax Systems Summer Quest">
       </label>
 
       <label>
@@ -79,6 +75,30 @@ function escapeHtml(text) {
     .replaceAll(">", "&gt;");
 }
 
+function getRunStatusPriority(status) {
+  const normalized = String(status || "").trim().toUpperCase();
+
+  if (normalized === "ACTIVE") return 1;
+  if (normalized === "DRAFT") return 2;
+  return 3;
+}
+
+function sortRuns(runs) {
+  return [...runs].sort((a, b) => {
+    const priorityA = getRunStatusPriority(a.status);
+    const priorityB = getRunStatusPriority(b.status);
+
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+
+    const startA = new Date(a.started_at).getTime();
+    const startB = new Date(b.started_at).getTime();
+
+    return startA - startB;
+  });
+}
+
 async function loadRuns() {
   const response = await fetch(`/api/runs/game/${gameId}`);
   const result = await response.json();
@@ -105,13 +125,15 @@ async function loadRuns() {
     return;
   }
 
-  tableBody.innerHTML = result.runs.map(run => `
-    <tr>
-      <td onclick="openRun(${run.id})" style="cursor:pointer">
+  const runs = sortRuns(result.runs);
+
+  tableBody.innerHTML = runs.map(run => `
+    <tr class="clickable-row">
+      <td onclick="openRun(${run.id})">
         ${escapeHtml(run.title)}
       </td>
 
-      <td onclick="openRun(${run.id})" style="cursor:pointer">
+      <td onclick="openRun(${run.id})">
         ${escapeHtml(QETime.formatLocalDateTimeForList(run.started_at))}
       </td>
 

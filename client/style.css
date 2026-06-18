@@ -2354,3 +2354,32 @@ th.selected-stat-column-cell {
   border-color: #cbd5e1;
   color: #374151;
 }
+
+/* Catalog filters and clickable admin rows */
+.catalog-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filter-btn.active {
+  background: #bfdbfe;
+  border-color: #60a5fa;
+  font-weight: 700;
+}
+
+.clickable-row td[onclick],
+.clickable-row[data-clickable="true"] {
+  cursor: pointer;
+}
+
+.clickable-row:hover td[onclick] {
+  background: #f8fafc;
+}

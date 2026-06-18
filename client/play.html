@@ -65,7 +65,7 @@
 
     <div class="card task-card">
 
-      <h1 id="gameTitle"></h1>
+      <h1 id="gameTitle" class="hidden"></h1>
 
       <div id="stormTabs" class="storm-tabs hidden"></div>
       <div id="stormBriefingBlock" class="storm-briefing hidden"></div>
@@ -209,8 +209,10 @@ async function loadGame() {
   if (result.status === "WAITING") {
     showOnly("waitingScreen");
 
+    document.title = result.game?.run_title || result.page?.title || result.game?.game_title || "Гра";
+
     document.getElementById("waitingGameTitle").textContent =
-      result.page?.title || result.game.game_title;
+      result.page?.title || "Брифінг";
 
     document.getElementById("waitingTeamName").textContent =
       `Команда: ${result.game.team_name}`;
@@ -246,6 +248,8 @@ async function loadGame() {
   currentGameType = result.game?.game_type || "LINEAR";
   currentStorm = result.storm || null;
 
+  document.title = result.game?.run_title || result.game?.game_title || "Гра";
+
   if (String(currentGameType || "LINEAR").toUpperCase() === "STORM" && currentStorm) {
     applyStormActiveTask(result);
   }
@@ -260,8 +264,7 @@ async function loadGame() {
   document.getElementById("teamNameDisplay").textContent = currentTeamName;
   document.getElementById("teamNameInput").value = currentTeamName;
 
-  document.getElementById("gameTitle").textContent =
-    result.game.game_title;
+  document.getElementById("gameTitle").textContent = "";
 
   renderStormShell(result);
 
@@ -557,7 +560,14 @@ function startWaitingCountdown(startedAt) {
     clearInterval(waitingStartInterval);
     waitingStartInterval = null;
   }
-  if (!node || !startedAt) return;
+  if (!node) return;
+
+  if (!startedAt) {
+    node.classList.add("hidden");
+    node.textContent = "";
+    return;
+  }
+
   const update = () => {
     const remaining = secondsUntil(startedAt);
     if (remaining > 0) {
@@ -565,6 +575,7 @@ function startWaitingCountdown(startedAt) {
       node.textContent = `До старту гри залишилось: ${formatStormDuration(remaining)}`;
     } else {
       node.classList.add("hidden");
+      node.textContent = "";
       clearInterval(waitingStartInterval);
       waitingStartInterval = null;
       loadGame();
