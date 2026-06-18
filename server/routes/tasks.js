@@ -124,7 +124,16 @@ router.get("/:id", requireAuth, (req, res) => {
 
 router.put("/:id", requireAuth, (req, res) => {
   const taskId = req.params.id;
-  const { title, task_type, hide_answers_block, score_points } = req.body;
+  const {
+    title,
+    task_type,
+    hide_answers_block,
+    score_points,
+    unlock_type,
+    unlock_delay_seconds,
+    unlock_task_id,
+    unlock_code
+  } = req.body;
 
   if (task_type && !["STANDARD", "OLYMPIAD", "MULTITASK"].includes(task_type)) {
     return res.status(400).json({
@@ -133,6 +142,12 @@ router.put("/:id", requireAuth, (req, res) => {
   }
 
   const hasHideAnswers = Object.prototype.hasOwnProperty.call(req.body, "hide_answers_block");
+  const hasStormUnlock = Object.prototype.hasOwnProperty.call(req.body, "unlock_type");
+  const normalizedUnlockType = String(unlock_type || "IMMEDIATE").toUpperCase();
+
+  if (hasStormUnlock && !["IMMEDIATE", "TIME", "TASK", "CODE"].includes(normalizedUnlockType)) {
+    return res.status(400).json({ error: "Невірна умова розблокування STORM" });
+  }
 
   db.run(
     `
@@ -142,6 +157,10 @@ router.put("/:id", requireAuth, (req, res) => {
       task_type = COALESCE(?, task_type),
       hide_answers_block = CASE WHEN ? THEN ? ELSE hide_answers_block END,
       score_points = CASE WHEN ? THEN ? ELSE score_points END,
+      unlock_type = CASE WHEN ? THEN ? ELSE unlock_type END,
+      unlock_delay_seconds = CASE WHEN ? THEN ? ELSE unlock_delay_seconds END,
+      unlock_task_id = CASE WHEN ? THEN ? ELSE unlock_task_id END,
+      unlock_code = CASE WHEN ? THEN ? ELSE unlock_code END,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
     `,
@@ -152,6 +171,14 @@ router.put("/:id", requireAuth, (req, res) => {
       hide_answers_block ? 1 : 0,
       Object.prototype.hasOwnProperty.call(req.body, "score_points") ? 1 : 0,
       Math.max(0, Number(score_points) || 0),
+      hasStormUnlock ? 1 : 0,
+      hasStormUnlock ? normalizedUnlockType : null,
+      hasStormUnlock ? 1 : 0,
+      Math.max(0, Number(unlock_delay_seconds) || 0),
+      hasStormUnlock ? 1 : 0,
+      normalizedUnlockType === "TASK" ? (Number(unlock_task_id) || null) : null,
+      hasStormUnlock ? 1 : 0,
+      normalizedUnlockType === "CODE" ? String(unlock_code || "").trim() : null,
       taskId
     ],
     function(error) {

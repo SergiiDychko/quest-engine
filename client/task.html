@@ -83,6 +83,7 @@
       <button class="tab-btn" data-tab="codesTab">Коди</button>
       <button class="tab-btn" data-tab="hintsTab">Підказки</button>
       <button class="tab-btn" data-tab="autoTab">Автоперехід</button>
+      <button class="tab-btn hidden" data-tab="stormTab">Видача у STORM</button>
       <button class="tab-btn hidden" data-tab="multitaskTab">Multitask</button>
     </div>
 
@@ -128,6 +129,44 @@
       <div id="multitaskEditor">Завантаження...</div>
     </section>
 
+
+    <section id="stormTab" class="tab-panel hidden">
+      <h2>Видача у STORM</h2>
+      <p class="muted-text">Цей блок видимий тільки для ігор з механікою STORM. У LINEAR ці умови ігноруються.</p>
+
+      <div class="info-block storm-unlock-editor">
+        <label class="auto-row">
+          <span>Коли показати вкладку завдання</span>
+          <select id="stormUnlockType">
+            <option value="IMMEDIATE">Одразу після старту гри</option>
+            <option value="TIME">Через певний час після старту</option>
+            <option value="TASK">Після виконання іншого завдання</option>
+            <option value="CODE">Після здачі певного коду</option>
+          </select>
+        </label>
+
+        <label id="stormUnlockTimeRow" class="auto-row hidden">
+          <span>Затримка після старту, секунд</span>
+          <input id="stormUnlockDelaySeconds" type="number" min="0" value="0">
+        </label>
+
+        <label id="stormUnlockTaskRow" class="auto-row hidden">
+          <span>Відкрити після завдання</span>
+          <select id="stormUnlockTaskId"></select>
+        </label>
+
+        <label id="stormUnlockCodeRow" class="auto-row hidden">
+          <span>Код для розблокування</span>
+          <input id="stormUnlockCode" type="text" placeholder="Наприклад: фінал">
+        </label>
+
+        <div class="auto-row">
+          <button id="saveStormUnlockBtn" type="button">Зберегти умови STORM</button>
+          <span id="stormUnlockMessage"></span>
+        </div>
+      </div>
+    </section>
+
     <section id="autoTab" class="tab-panel hidden">
       <h2>Автоперехід</h2>
 
@@ -168,6 +207,7 @@ let currentAnswers = [];
 let currentHints = [];
 let currentOlympiad = null;
 let currentMultitask = null;
+let currentGameTasks = [];
 let multitaskContentEditor = null;
 let multitaskEditingSubtaskId = null;
 
@@ -205,6 +245,10 @@ function updateTaskEditorMode() {
   const codesButton = document.querySelector('[data-tab="codesTab"]');
   const hintsButton = document.querySelector('[data-tab="hintsTab"]');
   const multitaskButton = document.querySelector('[data-tab="multitaskTab"]');
+  const stormButton = document.querySelector('[data-tab="stormTab"]');
+  const isStormGame = String(currentGame?.game_type || "LINEAR").toUpperCase() === "STORM";
+
+  if (stormButton) stormButton.classList.toggle("hidden", !isStormGame);
 
   if (contentButton) contentButton.classList.toggle("hidden", isOlympiad || isMultitask);
   if (hintsButton) hintsButton.classList.toggle("hidden", isOlympiad || isMultitask);
@@ -267,6 +311,8 @@ document.getElementById("taskTypeSelect").value =
   await loadMultitaskIfNeeded();
   renderCodes(currentAnswers);
   renderAutoTransition();
+  await loadGameTasksForStorm();
+  renderStormUnlockEditor();
 }
 
 async function saveTaskHeader(options = {}) {
@@ -278,7 +324,8 @@ async function saveTaskHeader(options = {}) {
     body: JSON.stringify({
       title,
       task_type: document.getElementById("taskTypeSelect").value,
-      score_points: isScoreModeValue(currentGame?.winner_type) ? (document.getElementById("taskScorePointsInput")?.value || 0) : 0
+      score_points: isScoreModeValue(currentGame?.winner_type) ? (document.getElementById("taskScorePointsInput")?.value || 0) : 0,
+      ...collectStormUnlockPayload()
     })
   });
 
@@ -1898,6 +1945,108 @@ window.saveTaskChangesFromParent = async function () {
 
   return { ok: true };
 };
+
+
+async function loadGameTasksForStorm() {
+  if (!gameId || String(currentGame?.game_type || "LINEAR").toUpperCase() !== "STORM") {
+    currentGameTasks = [];
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/games/${gameId}/tasks`);
+    const result = await response.json();
+    currentGameTasks = response.ok ? (result.tasks || []) : [];
+  } catch (error) {
+    currentGameTasks = [];
+  }
+}
+
+function collectStormUnlockPayload() {
+  if (String(currentGame?.game_type || "LINEAR").toUpperCase() !== "STORM") {
+    return {};
+  }
+
+  const type = document.getElementById("stormUnlockType")?.value || "IMMEDIATE";
+  return {
+    unlock_type: type,
+    unlock_delay_seconds: type === "TIME" ? (Number(document.getElementById("stormUnlockDelaySeconds")?.value) || 0) : 0,
+    unlock_task_id: type === "TASK" ? (Number(document.getElementById("stormUnlockTaskId")?.value) || null) : null,
+    unlock_code: type === "CODE" ? (document.getElementById("stormUnlockCode")?.value || "").trim() : ""
+  };
+}
+
+function updateStormUnlockFields() {
+  const type = document.getElementById("stormUnlockType")?.value || "IMMEDIATE";
+  document.getElementById("stormUnlockTimeRow")?.classList.toggle("hidden", type !== "TIME");
+  document.getElementById("stormUnlockTaskRow")?.classList.toggle("hidden", type !== "TASK");
+  document.getElementById("stormUnlockCodeRow")?.classList.toggle("hidden", type !== "CODE");
+}
+
+function renderStormUnlockEditor() {
+  const isStormGame = String(currentGame?.game_type || "LINEAR").toUpperCase() === "STORM";
+  const stormButton = document.querySelector('[data-tab="stormTab"]');
+  const stormPanel = document.getElementById("stormTab");
+
+  if (stormButton) stormButton.classList.toggle("hidden", !isStormGame);
+  if (stormPanel) stormPanel.classList.toggle("hidden", !isStormGame && stormPanel.classList.contains("active"));
+
+  if (!isStormGame || !currentTask) return;
+
+  const unlockType = String(currentTask.unlock_type || "IMMEDIATE").toUpperCase();
+  const typeSelect = document.getElementById("stormUnlockType");
+  const delayInput = document.getElementById("stormUnlockDelaySeconds");
+  const taskSelect = document.getElementById("stormUnlockTaskId");
+  const codeInput = document.getElementById("stormUnlockCode");
+
+  if (typeSelect) typeSelect.value = ["IMMEDIATE", "TIME", "TASK", "CODE"].includes(unlockType) ? unlockType : "IMMEDIATE";
+  if (delayInput) delayInput.value = Number(currentTask.unlock_delay_seconds) || 0;
+  if (codeInput) codeInput.value = currentTask.unlock_code || "";
+
+  if (taskSelect) {
+    const options = currentGameTasks
+      .filter(task => Number(task.id) !== Number(currentTask.id))
+      .map(task => {
+        const label = String(task.title || "").trim()
+          ? `Завдання ${task.sort_order}. ${task.title}`
+          : `Завдання ${task.sort_order}`;
+        return `<option value="${task.id}">${escapeHtml(label)}</option>`;
+      });
+    taskSelect.innerHTML = options.length ? options.join("") : `<option value="">Немає інших завдань</option>`;
+    taskSelect.value = currentTask.unlock_task_id || "";
+  }
+
+  updateStormUnlockFields();
+}
+
+async function saveStormUnlockSettings() {
+  const message = document.getElementById("stormUnlockMessage");
+  const response = await fetch(`/api/tasks/${taskId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: document.getElementById("taskNameInput").value.trim(),
+      task_type: document.getElementById("taskTypeSelect").value,
+      score_points: isScoreModeValue(currentGame?.winner_type) ? (document.getElementById("taskScorePointsInput")?.value || 0) : 0,
+      ...collectStormUnlockPayload()
+    })
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    message.className = "";
+    message.textContent = result.error || "Помилка збереження STORM";
+    return;
+  }
+
+  message.className = "success-message";
+  message.textContent = "✓ Умови STORM збережено";
+  setTimeout(() => { message.textContent = ""; }, 3000);
+  await loadTask();
+}
+
+document.getElementById("stormUnlockType")?.addEventListener("change", updateStormUnlockFields);
+document.getElementById("saveStormUnlockBtn")?.addEventListener("click", saveStormUnlockSettings);
 
 loadTask();
 loadContent();

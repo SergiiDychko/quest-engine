@@ -429,9 +429,13 @@ router.post("/:id/copy", requireAuth, async (req, res) => {
           auto_transition_penalty_seconds,
           required_main_answers,
           hide_answers_block,
-          score_points
+          score_points,
+          unlock_type,
+          unlock_delay_seconds,
+          unlock_task_id,
+          unlock_code
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           newGameId,
@@ -444,7 +448,11 @@ router.post("/:id/copy", requireAuth, async (req, res) => {
           winnerChanged ? 0 : (Number(task.auto_transition_penalty_seconds) || 0),
           task.required_main_answers,
           task.hide_answers_block || 0,
-          winnerChanged ? 0 : (Number(task.score_points) || 0)
+          winnerChanged ? 0 : (Number(task.score_points) || 0),
+          task.unlock_type || "IMMEDIATE",
+          Number(task.unlock_delay_seconds) || 0,
+          task.unlock_task_id || null,
+          task.unlock_code || null
         ]
       );
 
@@ -611,6 +619,19 @@ router.post("/:id/copy", requireAuth, async (req, res) => {
             ]
           );
         }
+      }
+    }
+
+    for (const sourceTask of tasks) {
+      const copiedTaskId = taskIdMap.get(Number(sourceTask.id));
+      if (!copiedTaskId) continue;
+
+      if (String(sourceTask.unlock_type || "IMMEDIATE").toUpperCase() === "TASK") {
+        const mappedDependencyId = taskIdMap.get(Number(sourceTask.unlock_task_id)) || null;
+        await dbRun(
+          `UPDATE tasks SET unlock_task_id = ? WHERE id = ?`,
+          [mappedDependencyId, copiedTaskId]
+        );
       }
     }
 

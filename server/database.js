@@ -358,6 +358,10 @@ db.run(`
   `);
 
   db.run(`ALTER TABLE tasks ADD COLUMN hide_answers_block INTEGER NOT NULL DEFAULT 0`, () => {});
+  db.run(`ALTER TABLE tasks ADD COLUMN unlock_type TEXT NOT NULL DEFAULT 'IMMEDIATE'`, () => {});
+  db.run(`ALTER TABLE tasks ADD COLUMN unlock_delay_seconds INTEGER NOT NULL DEFAULT 0`, () => {});
+  db.run(`ALTER TABLE tasks ADD COLUMN unlock_task_id INTEGER`, () => {});
+  db.run(`ALTER TABLE tasks ADD COLUMN unlock_code TEXT`, () => {});
   db.run(`ALTER TABLE olympiad_settings ADD COLUMN purchase_available_after_seconds INTEGER NOT NULL DEFAULT 0`, () => {});
   db.run(`ALTER TABLE olympiad_cells ADD COLUMN purchase_value INTEGER NOT NULL DEFAULT 0`, () => {});
   db.run(`ALTER TABLE olympiad_cells ADD COLUMN task_answer_id INTEGER`, () => {});

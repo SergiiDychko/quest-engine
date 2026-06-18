@@ -427,6 +427,7 @@ function getGameDataByPin(pin, callback) {
       teams.name AS team_name,
       teams.pin AS team_pin,
       teams.finished_at AS team_finished_at,
+      teams.created_at AS team_created_at,
 
       game_runs.id AS run_id,
       game_runs.title AS run_title,
@@ -720,22 +721,34 @@ function completeTaskIfNeeded(teamId, task, callback) {
         if (updateError) return callback(updateError);
 
         addTaskCompletionScoreIfNeeded(teamId, task)
-          .then(() => openNextTaskAt(
-          teamId,
-          task.game_id,
-          task.sort_order,
-          completedAt,
-          nextError => {
-            if (nextError) return callback(nextError);
+          .then(() => {
+            const isStorm = String(task.game_type || "LINEAR").toUpperCase() === "STORM";
+            if (isStorm) {
+              return callback(null, {
+                completed: true,
+                completed_at: completedAt,
+                found_main: foundMain,
+                required_main_answers: requiredMainAnswers
+              });
+            }
 
-            callback(null, {
-              completed: true,
-              completed_at: completedAt,
-              found_main: foundMain,
-              required_main_answers: requiredMainAnswers
-            });
-          }
-        ))
+            openNextTaskAt(
+              teamId,
+              task.game_id,
+              task.sort_order,
+              completedAt,
+              nextError => {
+                if (nextError) return callback(nextError);
+
+                callback(null, {
+                  completed: true,
+                  completed_at: completedAt,
+                  found_main: foundMain,
+                  required_main_answers: requiredMainAnswers
+                });
+              }
+            );
+          })
           .catch(scoreError => callback(scoreError));
       }
     );
@@ -745,6 +758,223 @@ function completeTaskIfNeeded(teamId, task, callback) {
       );
     }
   );
+}
+
+
+function secondsUntilUtc(value) {
+  if (!value) return null;
+  const target = parseUtcDate(value);
+  if (!target || Number.isNaN(target.getTime())) return null;
+  return Math.max(0, Math.floor((target.getTime() - Date.now()) / 1000));
+}
+
+function addSecondsToUtc(value, seconds) {
+  const base = parseUtcDate(value);
+  if (!base || Number.isNaN(base.getTime())) return null;
+  return new Date(base.getTime() + (Number(seconds) || 0) * 1000);
+}
+
+async function ensureStormTeamTask(teamId, taskId, openedAt) {
+  await dbRun(
+    `
+    INSERT INTO team_tasks (team_id, task_id, opened_at)
+    SELECT ?, ?, ?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM team_tasks WHERE team_id = ? AND task_id = ?
+    )
+    `,
+    [teamId, taskId, openedAt || null, teamId, taskId]
+  );
+}
+
+async function isStormTaskUnlocked({ gameData, task, completedTaskIds, foundCodes }) {
+  const unlockType = String(task.unlock_type || "IMMEDIATE").toUpperCase();
+
+  if (unlockType === "TIME") {
+    const delay = Math.max(0, Number(task.unlock_delay_seconds) || 0);
+    const base = gameData.started_at || gameData.team_created_at;
+    const opensAt = addSecondsToUtc(base, delay);
+    const remaining = opensAt ? Math.max(0, Math.floor((opensAt.getTime() - Date.now()) / 1000)) : 0;
+    return {
+      unlocked: remaining <= 0,
+      opensAt: opensAt ? opensAt.toISOString() : null,
+      remaining_seconds: remaining,
+      locked_message: remaining > 0 ? null : ""
+    };
+  }
+
+  if (unlockType === "TASK") {
+    const dependencyId = Number(task.unlock_task_id) || 0;
+    const unlocked = dependencyId > 0 && completedTaskIds.has(dependencyId);
+    const dependencyTitle = task.unlock_task_title
+      ? `Завдання ${task.unlock_task_sort_order}. ${task.unlock_task_title}`
+      : (task.unlock_task_sort_order ? `Завдання ${task.unlock_task_sort_order}` : "іншого завдання");
+    return {
+      unlocked,
+      opensAt: null,
+      remaining_seconds: null,
+      locked_message: `Відкриється після виконання "${dependencyTitle}"`
+    };
+  }
+
+  if (unlockType === "CODE") {
+    const requiredCode = normalizeAnswer(task.unlock_code || "");
+    const unlocked = requiredCode && foundCodes.has(requiredCode);
+    return {
+      unlocked,
+      opensAt: null,
+      remaining_seconds: null,
+      locked_message: "Відкриється після здачі певного коду"
+    };
+  }
+
+  return { unlocked: true, opensAt: null, remaining_seconds: null, locked_message: "" };
+}
+
+async function buildStormPayload(gameData) {
+  const tasks = await dbAll(
+    `
+    SELECT
+      tasks.*,
+      dependency.sort_order AS unlock_task_sort_order,
+      dependency.title AS unlock_task_title,
+      team_tasks.opened_at,
+      team_tasks.completed_at
+    FROM tasks
+    LEFT JOIN tasks AS dependency ON dependency.id = tasks.unlock_task_id
+    LEFT JOIN team_tasks
+      ON team_tasks.task_id = tasks.id
+     AND team_tasks.team_id = ?
+    WHERE tasks.game_id = ?
+    ORDER BY tasks.sort_order ASC, tasks.id ASC
+    `,
+    [gameData.team_id, gameData.game_id]
+  );
+
+  const completedTaskIds = new Set(
+    tasks.filter(task => task.completed_at).map(task => Number(task.id))
+  );
+
+  const foundRows = await dbAll(
+    `
+    SELECT task_answers.answer_text
+    FROM team_found_answers
+    JOIN task_answers ON task_answers.id = team_found_answers.task_answer_id
+    JOIN tasks ON tasks.id = task_answers.task_id
+    WHERE team_found_answers.team_id = ?
+      AND tasks.game_id = ?
+    `,
+    [gameData.team_id, gameData.game_id]
+  );
+
+  const foundCodes = new Set(foundRows.map(row => normalizeAnswer(row.answer_text)));
+  const nowSql = await dbGet(`SELECT CURRENT_TIMESTAMP AS now`);
+
+  const tabs = [];
+
+  for (const task of tasks) {
+    const unlockState = await isStormTaskUnlocked({ gameData, task, completedTaskIds, foundCodes });
+    const available = Boolean(unlockState.unlocked);
+
+    if (available && !task.opened_at) {
+      await ensureStormTeamTask(gameData.team_id, task.id, nowSql.now);
+      task.opened_at = nowSql.now;
+    }
+
+    const item = {
+      id: task.id,
+      sort_order: task.sort_order,
+      title: task.title || "",
+      task_type: task.task_type || "STANDARD",
+      completed_at: task.completed_at || null,
+      opened_at: task.opened_at || null,
+      available,
+      unlock_type: task.unlock_type || "IMMEDIATE",
+      remaining_seconds: unlockState.remaining_seconds,
+      locked_message: unlockState.remaining_seconds > 0
+        ? `Відкриється через ${formatDurationForStorm(unlockState.remaining_seconds)}`
+        : (available ? "" : unlockState.locked_message)
+    };
+
+    if (available) {
+      item.task = task;
+      item.content = task.task_type === "MULTITASK" ? [] : await dbAll(
+        `SELECT * FROM task_content WHERE task_id = ? ORDER BY sort_order ASC, id ASC`,
+        [task.id]
+      );
+      item.hints = task.task_type === "MULTITASK" ? [] : await dbAll(
+        `
+        SELECT task_hints.*, team_hint_purchases.purchased_at AS purchased_at
+        FROM task_hints
+        LEFT JOIN team_hint_purchases
+          ON team_hint_purchases.task_hint_id = task_hints.id
+         AND team_hint_purchases.team_id = ?
+        WHERE task_hints.task_id = ?
+        ORDER BY task_hints.sort_order ASC, task_hints.id ASC
+        `,
+        [gameData.team_id, task.id]
+      );
+      item.answers = task.hide_answers_block ? [] : await dbAll(
+        `SELECT id, answer_type, description, sort_order FROM task_answers WHERE task_id = ? ORDER BY answer_type, sort_order`,
+        [task.id]
+      );
+      item.found_answers = await dbAll(
+        `
+        SELECT
+          team_found_answers.task_answer_id,
+          task_answers.answer_text,
+          task_answers.answer_type,
+          task_answers.description,
+          task_answers.comment,
+          task_answers.sort_order,
+          task_answers.time_modifier_seconds
+        FROM team_found_answers
+        JOIN task_answers ON task_answers.id = team_found_answers.task_answer_id
+        WHERE team_found_answers.team_id = ?
+          AND task_answers.task_id = ?
+        ORDER BY task_answers.answer_type, task_answers.sort_order
+        `,
+        [gameData.team_id, task.id]
+      );
+      item.olympiad = task.task_type === "OLYMPIAD"
+        ? await getOlympiadPayload(gameData.team_id, task.id)
+        : null;
+      item.multitask = task.task_type === "MULTITASK"
+        ? await getMultitaskPayload(gameData.team_id, task.id)
+        : null;
+    }
+
+    tabs.push(item);
+  }
+
+  const active = tabs.find(item => item.available && !item.completed_at) || tabs.find(item => item.available) || null;
+  const briefingPage = await dbGet(
+    `SELECT * FROM game_pages WHERE game_id = ? AND page_type = 'START'`,
+    [gameData.game_id]
+  );
+
+  return {
+    briefing: briefingPage || null,
+    run_finished_at: gameData.run_finished_at || null,
+    tasks: tabs,
+    active_task_id: active ? active.id : null
+  };
+}
+
+function formatDurationForStorm(totalSeconds) {
+  const seconds = Math.max(0, Number(totalSeconds) || 0);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+async function getStormPlayableTask(gameData, requestedTaskId) {
+  const storm = await buildStormPayload(gameData);
+  const item = storm.tasks.find(task => Number(task.id) === Number(requestedTaskId || storm.active_task_id));
+  if (!item || !item.available || !item.task) return null;
+  return { task: { ...item.task, game_type: "STORM" }, storm };
 }
 
 function hasNextTask(teamId, gameId, callback) {
@@ -815,6 +1045,45 @@ router.get("/:pin", (req, res) => {
           });
         });
       }
+    }
+
+    if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM") {
+      buildStormPayload(gameData)
+        .then(storm => {
+          if (!storm.tasks.length) {
+            return res.json({ status: "NO_TASKS", game: gameData, storm });
+          }
+
+          const active = storm.tasks.find(item => Number(item.id) === Number(storm.active_task_id)) || null;
+
+          if (!active) {
+            return getGamePage(gameData.game_id, "FINISH", (pageError, page) => {
+              if (pageError) {
+                return res.status(500).json({ error: "Помилка завантаження фінальної сторінки" });
+              }
+
+              return res.json({ status: "FINISHED", game: gameData, page, storm });
+            });
+          }
+
+          return res.json({
+            status: "READY",
+            game: gameData,
+            task: active.task,
+            content: active.content || [],
+            hints: active.hints || [],
+            answers: active.answers || [],
+            found_answers: active.found_answers || [],
+            olympiad: active.olympiad || null,
+            multitask: active.multitask || null,
+            storm
+          });
+        })
+        .catch(error => {
+          console.error("Storm payload error:", error);
+          res.status(500).json({ error: "Помилка завантаження STORM-гри" });
+        });
+      return;
     }
 
     getCurrentTask(gameData.team_id, gameData.game_id, (taskError, task) => {
@@ -1003,6 +1272,7 @@ router.post("/:pin/answer", async (req, res) => {
         teams.name AS team_name,
         teams.pin AS team_pin,
         teams.finished_at AS team_finished_at,
+      teams.created_at AS team_created_at,
 
         game_runs.id AS run_id,
         game_runs.title AS run_title,
@@ -1035,16 +1305,27 @@ router.post("/:pin/answer", async (req, res) => {
       });
     }
 
-    const task = await new Promise((resolve, reject) => {
-      getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => {
-        if (error) reject(error);
-        else resolve(currentTask);
+    let stormPayloadForResponse = null;
+    let task = null;
+
+    if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM") {
+      const stormSelection = await getStormPlayableTask(gameData, req.body.task_id);
+      task = stormSelection ? stormSelection.task : null;
+      stormPayloadForResponse = stormSelection ? stormSelection.storm : null;
+    } else {
+      task = await new Promise((resolve, reject) => {
+        getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => {
+          if (error) reject(error);
+          else resolve(currentTask);
+        });
       });
-    });
+    }
 
     if (!task) {
       return res.status(404).json({
-        error: "Команда вже завершила гру"
+        error: String(gameData.game_type || "LINEAR").toUpperCase() === "STORM"
+          ? "Це завдання ще не доступне"
+          : "Команда вже завершила гру"
       });
     }
 
@@ -1306,6 +1587,10 @@ router.post("/:pin/answer", async (req, res) => {
       ? await getMultitaskPayload(gameData.team_id, task.id)
       : null;
 
+    const refreshedStorm = String(gameData.game_type || "LINEAR").toUpperCase() === "STORM"
+      ? await buildStormPayload(gameData)
+      : null;
+
     return res.json({
       accepted: acceptedCount > 0 || repeatedCount > 0,
       repeated: acceptedCount === 0 && repeatedCount > 0,
@@ -1316,6 +1601,8 @@ router.post("/:pin/answer", async (req, res) => {
       found_items: newlyFound,
       found: newlyFound[0] || null,
       olympiad,
+      multitask,
+      storm: refreshedStorm,
       found_main: completeResult.found_main,
       required_main_answers: completeResult.required_main_answers
     });
@@ -1346,11 +1633,17 @@ router.post("/:pin/hint/:hintId/purchase", async (req, res) => {
     if (!gameData) return res.status(404).json({ error: "Команду не знайдено" });
     if (gameData.run_status === "ARCHIVED") return res.status(403).json({ error: "Цей запуск уже в архіві" });
 
-    const task = await new Promise((resolve, reject) => {
-      getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => error ? reject(error) : resolve(currentTask));
-    });
+    let task = null;
+    if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM") {
+      const stormSelection = await getStormPlayableTask(gameData, req.body.task_id);
+      task = stormSelection ? stormSelection.task : null;
+    } else {
+      task = await new Promise((resolve, reject) => {
+        getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => error ? reject(error) : resolve(currentTask));
+      });
+    }
 
-    if (!task) return res.status(404).json({ error: "Команда вже завершила гру" });
+    if (!task) return res.status(404).json({ error: String(gameData.game_type || "LINEAR").toUpperCase() === "STORM" ? "Це завдання ще не доступне" : "Команда вже завершила гру" });
 
     const hint = await dbGet(`SELECT * FROM task_hints WHERE id = ? AND task_id = ?`, [hintId, task.id]);
     if (!hint) return res.status(404).json({ error: "Підказку не знайдено" });
@@ -1419,11 +1712,17 @@ router.post("/:pin/multitask/subtask/:subtaskId/hint/purchase", async (req, res)
     if (!gameData) return res.status(404).json({ error: "Команду не знайдено" });
     if (gameData.run_status === "ARCHIVED") return res.status(403).json({ error: "Цей запуск уже в архіві" });
 
-    const task = await new Promise((resolve, reject) => {
-      getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => error ? reject(error) : resolve(currentTask));
-    });
+    let task = null;
+    if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM") {
+      const stormSelection = await getStormPlayableTask(gameData, req.body.task_id);
+      task = stormSelection ? stormSelection.task : null;
+    } else {
+      task = await new Promise((resolve, reject) => {
+        getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => error ? reject(error) : resolve(currentTask));
+      });
+    }
 
-    if (!task) return res.status(404).json({ error: "Команда вже завершила гру" });
+    if (!task) return res.status(404).json({ error: String(gameData.game_type || "LINEAR").toUpperCase() === "STORM" ? "Це завдання ще не доступне" : "Команда вже завершила гру" });
     if (task.task_type !== "MULTITASK") return res.status(400).json({ error: "Поточне завдання не є Multitask" });
 
     const subtask = await dbGet(

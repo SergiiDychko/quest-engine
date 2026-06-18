@@ -2253,3 +2253,72 @@ th.selected-stat-column-cell {
 .standard-hint-card label.hidden {
   display: none !important;
 }
+
+/* STORM MVP */
+.storm-briefing {
+  margin: 12px 0 16px;
+  padding: 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.storm-briefing-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.storm-countdown {
+  font-size: 0.95rem;
+  color: #475569;
+}
+
+.storm-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0 18px;
+  border-bottom: 1px solid #dbe4ee;
+  padding-bottom: 8px;
+}
+
+.storm-tab {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  border-radius: 10px 10px 0 0;
+  padding: 8px 10px;
+  cursor: pointer;
+  min-height: 40px;
+}
+
+.storm-tab.active {
+  border-color: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
+}
+
+.storm-tab.completed {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+}
+
+.storm-tab.locked {
+  opacity: 0.75;
+  cursor: not-allowed;
+  background: #f1f5f9;
+}
+
+.storm-tab small {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.storm-unlock-editor .hidden {
+  display: none !important;
+}
