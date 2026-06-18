@@ -1806,18 +1806,26 @@ async function saveAllHintsSilently() {
   }
 
   for (const hint of currentHints) {
+    const typeInput = document.getElementById(`hint-type-${hint.id}`);
     const secondsInput = document.getElementById(`hint-seconds-${hint.id}`);
+    const purchaseAfterInput = document.getElementById(`hint-purchase-after-${hint.id}`);
+    const purchaseValueInput = document.getElementById(`hint-purchase-value-${hint.id}`);
     const contentInput = document.getElementById(`hint-content-${hint.id}`);
 
-    if (!secondsInput || !contentInput) {
+    if (!typeInput || !contentInput) {
       continue;
     }
+
+    const hint_type = typeInput.value || "TIMED";
 
     const response = await fetch(`/api/task-hints/${hint.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        show_after_seconds: secondsInput.value,
+        hint_type,
+        show_after_seconds: secondsInput ? secondsInput.value : 0,
+        purchase_after_seconds: purchaseAfterInput ? purchaseAfterInput.value : 0,
+        purchase_value: purchaseValueInput ? purchaseValueInput.value : 0,
         content: contentInput.value
       })
     });
@@ -1921,14 +1929,39 @@ async function saveAutoTransitionSilently() {
   return { ok: true };
 }
 
+async function saveStormUnlockSettingsSilently() {
+  if (String(currentGame?.game_type || "LINEAR").toUpperCase() !== "STORM") {
+    return { ok: true };
+  }
+
+  const response = await fetch(`/api/tasks/${taskId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: document.getElementById("taskNameInput").value.trim(),
+      task_type: document.getElementById("taskTypeSelect").value,
+      score_points: isScoreModeValue(currentGame?.winner_type) ? (document.getElementById("taskScorePointsInput")?.value || 0) : 0,
+      ...collectStormUnlockPayload()
+    })
+  });
+
+  if (!response.ok) {
+    const result = await response.json();
+    return { ok: false, error: result.error || "Помилка збереження STORM" };
+  }
+
+  return { ok: true };
+}
+
 window.saveTaskChangesFromParent = async function () {
   const steps = [
     () => saveTaskHeader({ silent: true, skipReload: true }),
     saveContentBlocksSilently,
     saveAllCodesSilently,
-    saveMultitask,
+    () => saveMultitask({ silent: true }),
     saveAllHintsSilently,
-    saveAutoTransitionSilently
+    saveAutoTransitionSilently,
+    saveStormUnlockSettingsSilently
   ];
 
   for (const step of steps) {
@@ -2021,19 +2054,9 @@ function renderStormUnlockEditor() {
 
 async function saveStormUnlockSettings() {
   const message = document.getElementById("stormUnlockMessage");
-  const response = await fetch(`/api/tasks/${taskId}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title: document.getElementById("taskNameInput").value.trim(),
-      task_type: document.getElementById("taskTypeSelect").value,
-      score_points: isScoreModeValue(currentGame?.winner_type) ? (document.getElementById("taskScorePointsInput")?.value || 0) : 0,
-      ...collectStormUnlockPayload()
-    })
-  });
+  const result = await saveStormUnlockSettingsSilently();
 
-  const result = await response.json();
-  if (!response.ok) {
+  if (!result.ok) {
     message.className = "";
     message.textContent = result.error || "Помилка збереження STORM";
     return;
@@ -2048,9 +2071,13 @@ async function saveStormUnlockSettings() {
 document.getElementById("stormUnlockType")?.addEventListener("change", updateStormUnlockFields);
 document.getElementById("saveStormUnlockBtn")?.addEventListener("click", saveStormUnlockSettings);
 
-loadTask();
-loadContent();
-loadHints();
+async function initTaskEditor() {
+  await loadTask();
+  await loadContent();
+  await loadHints();
+}
+
+initTaskEditor();
 </script>
 </body>
 </html>

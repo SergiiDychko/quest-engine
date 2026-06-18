@@ -456,7 +456,8 @@ function getCurrentTask(teamId, gameId, callback) {
     SELECT
       tasks.*,
       team_tasks.opened_at,
-      team_tasks.completed_at
+      team_tasks.completed_at,
+      team_tasks.auto_transition
     FROM tasks
     LEFT JOIN team_tasks
       ON team_tasks.task_id = tasks.id
@@ -839,7 +840,8 @@ async function buildStormPayload(gameData) {
       dependency.sort_order AS unlock_task_sort_order,
       dependency.title AS unlock_task_title,
       team_tasks.opened_at,
-      team_tasks.completed_at
+      team_tasks.completed_at,
+      team_tasks.auto_transition
     FROM tasks
     LEFT JOIN tasks AS dependency ON dependency.id = tasks.unlock_task_id
     LEFT JOIN team_tasks
@@ -887,7 +889,10 @@ async function buildStormPayload(gameData) {
       title: task.title || "",
       task_type: task.task_type || "STANDARD",
       completed_at: task.completed_at || null,
+      auto_transition: Number(task.auto_transition) || 0,
       opened_at: task.opened_at || null,
+      auto_transition_minutes: Number(task.auto_transition_minutes) || 0,
+      score_points: Number(task.score_points) || 0,
       available,
       unlock_type: task.unlock_type || "IMMEDIATE",
       remaining_seconds: unlockState.remaining_seconds,
@@ -947,7 +952,10 @@ async function buildStormPayload(gameData) {
     tabs.push(item);
   }
 
-  const active = tabs.find(item => item.available && !item.completed_at) || tabs.find(item => item.available) || null;
+  const activePlayable = tabs.find(item => item.available && !item.completed_at) || null;
+  const activeDisplay = activePlayable || tabs.find(item => item.available) || null;
+  const hasFutureLockedTasks = tabs.some(item => !item.available);
+  const hasOpenOrFutureTasks = Boolean(activePlayable || hasFutureLockedTasks);
   const briefingPage = await dbGet(
     `SELECT * FROM game_pages WHERE game_id = ? AND page_type = 'START'`,
     [gameData.game_id]
@@ -957,7 +965,8 @@ async function buildStormPayload(gameData) {
     briefing: briefingPage || null,
     run_finished_at: gameData.run_finished_at || null,
     tasks: tabs,
-    active_task_id: active ? active.id : null
+    has_open_or_future_tasks: hasOpenOrFutureTasks,
+    active_task_id: activeDisplay ? activeDisplay.id : null
   };
 }
 
@@ -973,7 +982,7 @@ function formatDurationForStorm(totalSeconds) {
 async function getStormPlayableTask(gameData, requestedTaskId) {
   const storm = await buildStormPayload(gameData);
   const item = storm.tasks.find(task => Number(task.id) === Number(requestedTaskId || storm.active_task_id));
-  if (!item || !item.available || !item.task) return null;
+  if (!item || !item.available || !item.task || item.completed_at) return null;
   return { task: { ...item.task, game_type: "STORM" }, storm };
 }
 
@@ -1028,6 +1037,20 @@ router.get("/:pin", (req, res) => {
       });
     }
 
+    if (gameData.team_finished_at) {
+      return getGamePage(gameData.game_id, "FINISH", (pageError, page) => {
+        if (pageError) {
+          return res.status(500).json({ error: "Помилка завантаження фінальної сторінки" });
+        }
+
+        return res.json({
+          status: "FINISHED",
+          game: gameData,
+          page
+        });
+      });
+    }
+
     if (gameData.started_at && gameData.run_status !== "ACTIVE") {
       const startDate = parseUtcDate(gameData.started_at);
       const now = new Date();
@@ -1048,6 +1071,17 @@ router.get("/:pin", (req, res) => {
     }
 
     if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM") {
+      if (gameData.run_finished_at) {
+        const finishDate = parseUtcDate(gameData.run_finished_at);
+        if (finishDate && Date.now() >= finishDate.getTime()) {
+          db.run(`UPDATE teams SET finished_at = CURRENT_TIMESTAMP WHERE id = ? AND finished_at IS NULL`, [gameData.team_id]);
+          return getGamePage(gameData.game_id, "FINISH", (pageError, page) => {
+            if (pageError) return res.status(500).json({ error: "Помилка завантаження фінальної сторінки" });
+            return res.json({ status: "FINISHED", game: gameData, page });
+          });
+        }
+      }
+
       buildStormPayload(gameData)
         .then(storm => {
           if (!storm.tasks.length) {
@@ -1056,7 +1090,7 @@ router.get("/:pin", (req, res) => {
 
           const active = storm.tasks.find(item => Number(item.id) === Number(storm.active_task_id)) || null;
 
-          if (!active) {
+          if (!storm.has_open_or_future_tasks) {
             return getGamePage(gameData.game_id, "FINISH", (pageError, page) => {
               if (pageError) {
                 return res.status(500).json({ error: "Помилка завантаження фінальної сторінки" });
@@ -1064,6 +1098,10 @@ router.get("/:pin", (req, res) => {
 
               return res.json({ status: "FINISHED", game: gameData, page, storm });
             });
+          }
+
+          if (!active || !active.task) {
+            return res.json({ status: "READY", game: gameData, task: {}, content: [], hints: [], answers: [], found_answers: [], olympiad: null, multitask: null, storm });
           }
 
           return res.json({
@@ -1305,6 +1343,18 @@ router.post("/:pin/answer", async (req, res) => {
       });
     }
 
+    if (gameData.team_finished_at) {
+      return res.status(403).json({ error: "Гру вже завершено" });
+    }
+
+    if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM" && gameData.run_finished_at) {
+      const finishDate = parseUtcDate(gameData.run_finished_at);
+      if (finishDate && Date.now() >= finishDate.getTime()) {
+        await dbRun(`UPDATE teams SET finished_at = CURRENT_TIMESTAMP WHERE id = ? AND finished_at IS NULL`, [gameData.team_id]);
+        return res.status(403).json({ error: "Час гри завершено" });
+      }
+    }
+
     let stormPayloadForResponse = null;
     let task = null;
 
@@ -1324,7 +1374,7 @@ router.post("/:pin/answer", async (req, res) => {
     if (!task) {
       return res.status(404).json({
         error: String(gameData.game_type || "LINEAR").toUpperCase() === "STORM"
-          ? "Це завдання ще не доступне"
+          ? "Це завдання вже недоступне або ще не відкрите"
           : "Команда вже завершила гру"
       });
     }
@@ -1591,6 +1641,10 @@ router.post("/:pin/answer", async (req, res) => {
       ? await buildStormPayload(gameData)
       : null;
 
+    if (refreshedStorm && !refreshedStorm.has_open_or_future_tasks) {
+      await dbRun(`UPDATE teams SET finished_at = CURRENT_TIMESTAMP WHERE id = ? AND finished_at IS NULL`, [gameData.team_id]);
+    }
+
     return res.json({
       accepted: acceptedCount > 0 || repeatedCount > 0,
       repeated: acceptedCount === 0 && repeatedCount > 0,
@@ -1632,6 +1686,14 @@ router.post("/:pin/hint/:hintId/purchase", async (req, res) => {
 
     if (!gameData) return res.status(404).json({ error: "Команду не знайдено" });
     if (gameData.run_status === "ARCHIVED") return res.status(403).json({ error: "Цей запуск уже в архіві" });
+    if (gameData.team_finished_at) return res.status(403).json({ error: "Гру вже завершено" });
+    if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM" && gameData.run_finished_at) {
+      const finishDate = parseUtcDate(gameData.run_finished_at);
+      if (finishDate && Date.now() >= finishDate.getTime()) {
+        await dbRun(`UPDATE teams SET finished_at = CURRENT_TIMESTAMP WHERE id = ? AND finished_at IS NULL`, [gameData.team_id]);
+        return res.status(403).json({ error: "Час гри завершено" });
+      }
+    }
 
     let task = null;
     if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM") {
@@ -1643,7 +1705,7 @@ router.post("/:pin/hint/:hintId/purchase", async (req, res) => {
       });
     }
 
-    if (!task) return res.status(404).json({ error: String(gameData.game_type || "LINEAR").toUpperCase() === "STORM" ? "Це завдання ще не доступне" : "Команда вже завершила гру" });
+    if (!task) return res.status(404).json({ error: String(gameData.game_type || "LINEAR").toUpperCase() === "STORM" ? "Це завдання вже недоступне або ще не відкрите" : "Команда вже завершила гру" });
 
     const hint = await dbGet(`SELECT * FROM task_hints WHERE id = ? AND task_id = ?`, [hintId, task.id]);
     if (!hint) return res.status(404).json({ error: "Підказку не знайдено" });
@@ -1711,6 +1773,14 @@ router.post("/:pin/multitask/subtask/:subtaskId/hint/purchase", async (req, res)
 
     if (!gameData) return res.status(404).json({ error: "Команду не знайдено" });
     if (gameData.run_status === "ARCHIVED") return res.status(403).json({ error: "Цей запуск уже в архіві" });
+    if (gameData.team_finished_at) return res.status(403).json({ error: "Гру вже завершено" });
+    if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM" && gameData.run_finished_at) {
+      const finishDate = parseUtcDate(gameData.run_finished_at);
+      if (finishDate && Date.now() >= finishDate.getTime()) {
+        await dbRun(`UPDATE teams SET finished_at = CURRENT_TIMESTAMP WHERE id = ? AND finished_at IS NULL`, [gameData.team_id]);
+        return res.status(403).json({ error: "Час гри завершено" });
+      }
+    }
 
     let task = null;
     if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM") {
@@ -1722,7 +1792,7 @@ router.post("/:pin/multitask/subtask/:subtaskId/hint/purchase", async (req, res)
       });
     }
 
-    if (!task) return res.status(404).json({ error: String(gameData.game_type || "LINEAR").toUpperCase() === "STORM" ? "Це завдання ще не доступне" : "Команда вже завершила гру" });
+    if (!task) return res.status(404).json({ error: String(gameData.game_type || "LINEAR").toUpperCase() === "STORM" ? "Це завдання вже недоступне або ще не відкрите" : "Команда вже завершила гру" });
     if (task.task_type !== "MULTITASK") return res.status(400).json({ error: "Поточне завдання не є Multitask" });
 
     const subtask = await dbGet(
@@ -1801,12 +1871,19 @@ router.post("/:pin/olympiad/cell/:cellNumber/purchase", async (req, res) => {
 
     if (!gameData) return res.status(404).json({ error: "Команду не знайдено" });
     if (gameData.run_status === "ARCHIVED") return res.status(403).json({ error: "Цей запуск уже в архіві" });
+    if (gameData.team_finished_at) return res.status(403).json({ error: "Гру вже завершено" });
 
-    const task = await new Promise((resolve, reject) => {
-      getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => error ? reject(error) : resolve(currentTask));
-    });
+    let task = null;
+    if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM") {
+      const stormSelection = await getStormPlayableTask(gameData, req.body.task_id);
+      task = stormSelection ? stormSelection.task : null;
+    } else {
+      task = await new Promise((resolve, reject) => {
+        getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => error ? reject(error) : resolve(currentTask));
+      });
+    }
 
-    if (!task) return res.status(404).json({ error: "Команда вже завершила гру" });
+    if (!task) return res.status(404).json({ error: String(gameData.game_type || "LINEAR").toUpperCase() === "STORM" ? "Це завдання вже недоступне або ще не відкрите" : "Команда вже завершила гру" });
     if (task.task_type !== "OLYMPIAD") return res.status(400).json({ error: "Поточне завдання не є олімпійкою" });
 
     const settings = await dbGet(`SELECT * FROM olympiad_settings WHERE task_id = ?`, [task.id]);
@@ -1924,195 +2001,147 @@ router.post("/:pin/olympiad/cell/:cellNumber/purchase", async (req, res) => {
   }
 });
 
-router.post("/:pin/auto-transition", (req, res) => {
+router.post("/:pin/auto-transition", async (req, res) => {
   const pin = String(req.params.pin || "").trim().toUpperCase();
 
-  getGameDataByPin(pin, (error, gameData) => {
-    if (error) {
-      return res.status(500).json({ error: "Помилка завантаження гри" });
-    }
+  try {
+    const gameData = await dbGet(
+      `
+      SELECT
+        teams.id AS team_id,
+        teams.name AS team_name,
+        teams.pin AS team_pin,
+        teams.finished_at AS team_finished_at,
+        teams.created_at AS team_created_at,
+        game_runs.id AS run_id,
+        game_runs.title AS run_title,
+        game_runs.run_code,
+        game_runs.status AS run_status,
+        game_runs.started_at,
+        game_runs.finished_at AS run_finished_at,
+        games.id AS game_id,
+        games.title AS game_title,
+        games.game_type,
+        games.winner_type
+      FROM teams
+      JOIN game_runs ON game_runs.id = teams.run_id
+      JOIN games ON games.id = game_runs.game_id
+      WHERE teams.pin = ?
+      `,
+      [pin]
+    );
 
-    if (!gameData) {
-      return res.status(404).json({ error: "Команду не знайдено" });
-    }
+    if (!gameData) return res.status(404).json({ error: "Команду не знайдено" });
+    if (gameData.run_status === "ARCHIVED") return res.status(403).json({ error: "Цей запуск уже в архіві" });
+    if (gameData.team_finished_at) return res.status(409).json({ error: "Гру вже завершено" });
 
-    getCurrentTask(gameData.team_id, gameData.game_id, (taskError, task) => {
-      if (taskError) {
-        return res.status(500).json({ error: "Помилка завантаження завдання" });
-      }
+    const isStorm = String(gameData.game_type || "LINEAR").toUpperCase() === "STORM";
+    let task = null;
+    let stormSelection = null;
 
-      if (!task) {
-        return res.json({
-          transitioned: false,
-          message: "Поточне завдання не знайдено"
-        });
-      }
+    if (isStorm) {
+      stormSelection = await getStormPlayableTask(gameData, req.body?.task_id);
+      task = stormSelection ? stormSelection.task : null;
+    } else {
+      task = await new Promise((resolve, reject) => {
+        getCurrentTask(gameData.team_id, gameData.game_id, (error, currentTask) => error ? reject(error) : resolve(currentTask));
+      });
 
       const requestedTaskId = Number(req.body?.task_id);
-      const currentTaskId = Number(task.id);
-
-      if (
-        requestedTaskId &&
-        requestedTaskId !== currentTaskId
-      ) {
-        return res.status(409).json({
-          error: "Автоперехід уже не актуальний"
-        });
+      if (requestedTaskId && task && requestedTaskId !== Number(task.id)) {
+        return res.status(409).json({ error: "Автоперехід уже не актуальний" });
       }
+    }
 
-      const autoTransitionSeconds =
-        Number(task.auto_transition_minutes) || 0;
+    if (!task) {
+      return res.status(404).json({ error: isStorm ? "Завдання вже недоступне" : "Поточне завдання не знайдено" });
+    }
 
-      if (autoTransitionSeconds <= 0) {
-        return res.status(400).json({
-          error: "Для цього завдання автоперехід не передбачений"
+    const autoTransitionSeconds = Number(task.auto_transition_minutes) || 0;
+    if (autoTransitionSeconds <= 0) {
+      return res.status(400).json({ error: "Для цього завдання автоперехід не передбачений" });
+    }
+
+    const timeRow = await dbGet(
+      `
+      SELECT datetime(opened_at, '+' || ? || ' seconds') AS completed_at
+      FROM team_tasks
+      WHERE team_id = ? AND task_id = ?
+      `,
+      [autoTransitionSeconds, gameData.team_id, task.id]
+    );
+
+    if (!timeRow || !timeRow.completed_at) {
+      return res.status(500).json({ error: "Помилка розрахунку часу автопереходу" });
+    }
+
+    const completedAt = timeRow.completed_at;
+    if (Date.now() < parseUtcDate(completedAt).getTime()) {
+      return res.status(409).json({ error: "Автоперехід ще не настав" });
+    }
+
+    const autoPenalty = Number(task.auto_transition_penalty_seconds) || 0;
+    const updateResult = await dbRun(
+      `
+      UPDATE team_tasks
+      SET completed_at = ?, auto_transition = 1, penalty_seconds = ?
+      WHERE team_id = ? AND task_id = ? AND completed_at IS NULL
+      `,
+      [completedAt, autoPenalty, gameData.team_id, task.id]
+    );
+
+    if (!updateResult.changes) {
+      const refreshedStorm = isStorm ? await buildStormPayload(gameData) : null;
+      return res.status(409).json({ error: "Завдання вже завершене", storm: refreshedStorm });
+    }
+
+    await addTaskCompletionScoreIfNeeded(gameData.team_id, task);
+
+    if (autoPenalty > 0) {
+      if (isScoreModeValue(gameData.winner_type)) {
+        await addScoreEvent({
+          teamId: gameData.team_id,
+          taskId: task.id,
+          eventType: "AUTO_TRANSITION",
+          points: -autoPenalty,
+          comment: "Штраф за блокування завдання"
         });
+      } else {
+        await dbRun(
+          `
+          INSERT INTO team_time_adjustments (team_id, task_id, adjustment_type, seconds, comment)
+          VALUES (?, ?, 'AUTO_TRANSITION', ?, ?)
+          `,
+          [gameData.team_id, task.id, autoPenalty, "Штраф за автоперехід"]
+        );
       }
+    }
 
-      db.get(
-        `
-        SELECT
-          datetime(opened_at, '+' || ? || ' seconds') AS completed_at
-        FROM team_tasks
-        WHERE team_id = ?
-          AND task_id = ?
-        `,
-        [
-          autoTransitionSeconds,
-          gameData.team_id,
-          task.id
-        ],
-        (timeError, timeRow) => {
-          if (timeError || !timeRow || !timeRow.completed_at) {
-            return res.status(500).json({
-              error: "Помилка розрахунку часу автопереходу"
-            });
-          }
+    if (isStorm) {
+      const refreshedStorm = await buildStormPayload(gameData);
+      if (!refreshedStorm.has_open_or_future_tasks) {
+        await dbRun(`UPDATE teams SET finished_at = ? WHERE id = ? AND finished_at IS NULL`, [completedAt, gameData.team_id]);
+      }
+      return res.json({ transitioned: true, message: "Час вийшов. Завдання заблоковано.", storm: refreshedStorm });
+    }
 
-          const completedAt = timeRow.completed_at;
-          const autoPenalty =
-            Number(task.auto_transition_penalty_seconds) || 0;
-
-          db.run(
-            `
-            UPDATE team_tasks
-            SET
-              completed_at = ?,
-              auto_transition = 1,
-              penalty_seconds = ?
-            WHERE team_id = ?
-              AND task_id = ?
-              AND completed_at IS NULL
-            `,
-            [
-              completedAt,
-              autoPenalty,
-              gameData.team_id,
-              task.id
-            ],
-            function(updateError) {
-              if (updateError) {
-                return res.status(500).json({
-                  error: "Помилка автопереходу"
-                });
-              }
-
-              if (this.changes === 0) {
-                return res.status(409).json({
-                  error: "Завдання вже завершене"
-                });
-              }
-
-              const continueAfterAdjustment = () => {
-                openNextTaskAt(
-                  gameData.team_id,
-                  gameData.game_id,
-                  task.sort_order,
-                  completedAt,
-                  (nextTaskError, nextExists) => {
-                    if (nextTaskError) {
-                      return res.status(500).json({
-                        error: "Помилка відкриття наступного завдання"
-                      });
-                    }
-
-                    if (!nextExists) {
-                      db.run(
-                        `
-                        UPDATE teams
-                        SET finished_at = ?
-                        WHERE id = ?
-                          AND finished_at IS NULL
-                        `,
-                        [
-                          completedAt,
-                          gameData.team_id
-                        ]
-                      );
-                    }
-
-                    res.json({
-                      transitioned: true,
-                      has_next_task: nextExists,
-                      message: nextExists
-                        ? "Час вийшов. Переходимо до наступного завдання."
-                        : "Час вийшов. Гру завершено."
-                    });
-                  }
-                );
-              };
-
-              if (autoPenalty > 0) {
-                if (isScoreModeValue(gameData.winner_type)) {
-                  addScoreEvent({
-                    teamId: gameData.team_id,
-                    taskId: task.id,
-                    eventType: "AUTO_TRANSITION",
-                    points: -autoPenalty,
-                    comment: "Штраф за автоперехід"
-                  })
-                    .then(continueAfterAdjustment)
-                    .catch(() => res.status(500).json({
-                      error: "Помилка збереження штрафу автопереходу"
-                    }));
-                } else {
-                  db.run(
-                    `
-                    INSERT INTO team_time_adjustments (
-                      team_id,
-                      task_id,
-                      adjustment_type,
-                      seconds,
-                      comment
-                    )
-                    VALUES (?, ?, 'AUTO_TRANSITION', ?, ?)
-                    `,
-                    [
-                      gameData.team_id,
-                      task.id,
-                      autoPenalty,
-                      "Штраф за автоперехід"
-                    ],
-                    adjustmentError => {
-                      if (adjustmentError) {
-                        return res.status(500).json({
-                          error: "Помилка збереження штрафу автопереходу"
-                        });
-                      }
-
-                      continueAfterAdjustment();
-                    }
-                  );
-                }
-              } else {
-                continueAfterAdjustment();
-              }
-            }
-          );
-        }
-      );
+    const nextExists = await new Promise((resolve, reject) => {
+      openNextTaskAt(gameData.team_id, gameData.game_id, task.sort_order, completedAt, (error, exists) => error ? reject(error) : resolve(exists));
     });
-  });
+
+    if (!nextExists) {
+      await dbRun(`UPDATE teams SET finished_at = ? WHERE id = ? AND finished_at IS NULL`, [completedAt, gameData.team_id]);
+    }
+
+    return res.json({
+      transitioned: true,
+      has_next_task: nextExists,
+      message: nextExists ? "Час вийшов. Переходимо до наступного завдання." : "Час вийшов. Гру завершено."
+    });
+  } catch (error) {
+    console.error("Auto transition error:", error);
+    return res.status(500).json({ error: "Помилка автопереходу" });
+  }
 });
 
 module.exports = router;

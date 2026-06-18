@@ -13,6 +13,7 @@
   <div id="waitingScreen" class="card hidden">
     <h1 id="waitingGameTitle">Гра</h1>
     <p id="waitingTeamName"></p>
+    <div id="waitingStartCountdown" class="waiting-start-countdown hidden"></div>
     <div id="waitingContent" class="task-content"></div>
   </div>
 
@@ -42,6 +43,8 @@
         >
           ✏️
         </button>
+
+        <div id="stormHeaderTimer" class="storm-header-timer hidden"></div>
       </div>
 
       <div id="teamNameEditBlock" class="team-name-edit hidden">
@@ -64,10 +67,12 @@
 
       <h1 id="gameTitle"></h1>
 
-      <div id="stormBriefingBlock" class="storm-briefing hidden"></div>
       <div id="stormTabs" class="storm-tabs hidden"></div>
+      <div id="stormBriefingBlock" class="storm-briefing hidden"></div>
 
       <h2 id="taskTitle"></h2>
+
+      <div id="stormTaskAutoTimer" class="storm-task-auto-timer hidden"></div>
 
       <div id="taskContent" class="task-content"></div>
 
@@ -106,7 +111,9 @@ let currentGameWinnerType = "TIME";
 let currentGameType = "LINEAR";
 let currentStorm = null;
 let selectedStormTaskId = null;
+let selectedStormBriefing = false;
 let stormTimerInterval = null;
+let waitingStartInterval = null;
 
 function isScoreModeValue(value) {
   const type = String(value || "TIME").toUpperCase();
@@ -125,6 +132,11 @@ function escapeHtml(text) {
 }
 
 function showOnly(screenId) {
+  if (screenId !== "waitingScreen" && waitingStartInterval) {
+    clearInterval(waitingStartInterval);
+    waitingStartInterval = null;
+  }
+
   document.getElementById("waitingScreen").classList.add("hidden");
   document.getElementById("noTasksScreen").classList.add("hidden");
   document.getElementById("finishedScreen").classList.add("hidden");
@@ -204,6 +216,8 @@ async function loadGame() {
 
     renderPageContent("waitingContent", result.page);
 
+    startWaitingCountdown(result.game?.started_at);
+
     if (!document.getElementById("waitingContent").innerHTML.trim()) {
       document.getElementById("waitingContent").innerHTML =
         `<p>Гра почнеться: ${formatDateTime(result.game.started_at)}</p>`;
@@ -249,6 +263,13 @@ async function loadGame() {
     result.game.game_title;
 
   renderStormShell(result);
+
+  if (!result.task || !result.task.id) {
+    selectedStormBriefing = true;
+    setStormBriefingMode(true);
+    renderStormTabs();
+    return;
+  }
 
   const taskName = String(result.task.title || "").trim();
   document.getElementById("taskTitle").textContent =
@@ -297,6 +318,7 @@ function renderStormShell(result) {
   if (!isStorm) {
     tabs.classList.add("hidden");
     briefing.classList.add("hidden");
+    document.getElementById("stormHeaderTimer")?.classList.add("hidden");
     if (stormTimerInterval) clearInterval(stormTimerInterval);
     stormTimerInterval = null;
     return;
@@ -306,16 +328,16 @@ function renderStormShell(result) {
   briefing.classList.remove("hidden");
 
   renderStormBriefing();
+  if (!selectedStormTaskId && currentStorm?.active_task_id) selectedStormTaskId = currentStorm.active_task_id;
+  if (!selectedStormBriefing) setStormBriefingMode(false);
   renderStormTabs();
+  updateStormHeaderTimer();
   startStormTimers();
 }
 
 function renderStormBriefing() {
   const briefing = document.getElementById("stormBriefingBlock");
   const page = currentStorm?.briefing || null;
-  const finishAt = currentStorm?.run_finished_at || null;
-  const remaining = finishAt ? secondsUntil(finishAt) : null;
-
   const briefingHtml = (() => {
     const blocks = parsePageBlocks(page && page.content);
     if (!blocks.length) return `<p class="muted-text">Брифінг для цієї гри ще не заповнено.</p>`;
@@ -325,7 +347,6 @@ function renderStormBriefing() {
   briefing.innerHTML = `
     <div class="storm-briefing-header">
       <strong>Брифінг</strong>
-      ${finishAt ? `<span class="storm-countdown">До завершення гри: <strong data-storm-countdown>${formatStormDuration(remaining)}</strong></span>` : ""}
     </div>
     <div class="task-content">${briefingHtml}</div>
   `;
@@ -333,20 +354,57 @@ function renderStormBriefing() {
   QEContentRenderer.resizeHtmlFrames(briefing);
 }
 
+function getStormTaskAutoRemaining(task) {
+  if (!task || task.completed_at || !task.opened_at) return null;
+  const seconds = Number(task.task?.auto_transition_minutes ?? task.auto_transition_minutes) || 0;
+  if (seconds <= 0) return null;
+  const openedDate = QETime.parseUtcDate(task.opened_at);
+  if (!openedDate || Number.isNaN(openedDate.getTime())) return null;
+  return Math.max(0, Math.floor((openedDate.getTime() + seconds * 1000 - Date.now()) / 1000));
+}
+
+function getStormTaskTabTitle(task) {
+  const taskName = String(task.title || "").trim() || `Завдання ${task.sort_order}`;
+  const points = Number(task.points || task.score_points || task.completion_points || 0);
+  const remaining = getStormTaskAutoRemaining(task);
+  const timer = remaining !== null ? ` ${formatSeconds(remaining)}` : "";
+  return `${task.sort_order}. ${taskName} (${points})${timer}`;
+}
+
+function getStormTaskItem(taskId) {
+  return (currentStorm?.tasks || []).find(item => Number(item.id) === Number(taskId)) || null;
+}
+
+function setStormBriefingMode(isBriefing) {
+  selectedStormBriefing = Boolean(isBriefing);
+  const briefing = document.getElementById("stormBriefingBlock");
+  const taskTitle = document.getElementById("taskTitle");
+  const taskContent = document.getElementById("taskContent");
+  const stormTaskAutoTimer = document.getElementById("stormTaskAutoTimer");
+
+  briefing.classList.toggle("hidden", !selectedStormBriefing);
+  taskTitle.classList.toggle("hidden", selectedStormBriefing);
+  taskContent.classList.toggle("hidden", selectedStormBriefing);
+  stormTaskAutoTimer?.classList.toggle("hidden", selectedStormBriefing || stormTaskAutoTimer.textContent.trim() === "");
+  document.getElementById("olympiadBlock")?.classList.toggle("hidden", selectedStormBriefing || !currentOlympiad);
+  document.getElementById("multitaskBlock")?.classList.toggle("hidden", selectedStormBriefing || !currentMultitask);
+  document.getElementById("formatBlock")?.classList.toggle("hidden", selectedStormBriefing || !currentAnswers.length);
+  document.getElementById("hintsBlock")?.classList.toggle("hidden", selectedStormBriefing);
+}
+
 function renderStormTabs() {
   const tabs = document.getElementById("stormTabs");
   const tasks = currentStorm?.tasks || [];
 
   tabs.innerHTML = `
-    <button type="button" class="storm-tab storm-tab-briefing" data-storm-briefing-tab>Брифінг</button>
+    <button type="button" class="storm-tab storm-tab-briefing ${selectedStormBriefing ? "active" : ""}" data-storm-briefing-tab>Брифінг</button>
     ${tasks.map(task => {
-      const title = String(task.title || "").trim()
-        ? `Завдання ${task.sort_order}. ${task.title}`
-        : `Завдання ${task.sort_order}`;
-      const active = Number(task.id) === Number(selectedStormTaskId);
+      const title = getStormTaskTabTitle(task);
+      const active = !selectedStormBriefing && Number(task.id) === Number(selectedStormTaskId);
       const completed = Boolean(task.completed_at);
+      const autoCompleted = Boolean(task.auto_transition);
       const locked = !task.available;
-      const classes = ["storm-tab", active ? "active" : "", completed ? "completed" : "", locked ? "locked" : ""].filter(Boolean).join(" ");
+      const classes = ["storm-tab", active ? "active" : "", completed ? (autoCompleted ? "auto-completed" : "completed") : "", locked ? "locked" : ""].filter(Boolean).join(" ");
       const hint = locked ? (task.locked_message || "Завдання ще заблоковане") : "";
       return `
         <button type="button" class="${classes}" data-storm-task-id="${task.id}" ${locked ? "disabled" : ""} title="${escapeHtml(hint)}">
@@ -358,7 +416,8 @@ function renderStormTabs() {
   `;
 
   tabs.querySelector('[data-storm-briefing-tab]')?.addEventListener('click', () => {
-    document.getElementById("stormBriefingBlock").scrollIntoView({ behavior: "smooth", block: "start" });
+    setStormBriefingMode(true);
+    renderStormTabs();
   });
 
   tabs.querySelectorAll('[data-storm-task-id]').forEach(button => {
@@ -366,6 +425,7 @@ function renderStormTabs() {
       const id = Number(button.dataset.stormTaskId);
       const task = (currentStorm.tasks || []).find(item => Number(item.id) === id && item.available);
       if (!task || !task.task) return;
+      selectedStormBriefing = false;
       selectedStormTaskId = id;
       currentTask = task.task;
       currentAnswers = task.answers || [];
@@ -380,6 +440,7 @@ function renderStormTabs() {
       renderMultitask();
       renderFormat();
       renderHintsAndAutoTransition(task.hints || [], currentTask);
+      setStormBriefingMode(false);
     });
   });
 }
@@ -401,13 +462,61 @@ function formatStormDuration(totalSeconds) {
     : `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function formatStormFinishDateTime(value) {
+  const date = QETime.parseUtcDate(value);
+  if (!date || Number.isNaN(date.getTime())) return "";
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${dd}.${mm}.${yyyy} о ${hh}:${min}`;
+}
+
+function updateStormHeaderTimer() {
+  const node = document.getElementById("stormHeaderTimer");
+  if (!node) return;
+  const finishAt = currentStorm?.run_finished_at || null;
+  if (!finishAt) {
+    node.classList.add("hidden");
+    node.textContent = "";
+    return;
+  }
+  const remaining = secondsUntil(finishAt);
+  node.classList.remove("hidden");
+  node.textContent = remaining < 86400
+    ? `До завершення гри: ${formatStormDuration(remaining)}`
+    : `Гра завершиться ${formatStormFinishDateTime(finishAt)}`;
+  if (remaining <= 0) loadGame();
+}
+
+function startWaitingCountdown(startedAt) {
+  const node = document.getElementById("waitingStartCountdown");
+  if (waitingStartInterval) {
+    clearInterval(waitingStartInterval);
+    waitingStartInterval = null;
+  }
+  if (!node || !startedAt) return;
+  const update = () => {
+    const remaining = secondsUntil(startedAt);
+    if (remaining > 0) {
+      node.classList.remove("hidden");
+      node.textContent = `Гра розпочнеться через: ${formatStormDuration(remaining)}`;
+    } else {
+      node.classList.add("hidden");
+      clearInterval(waitingStartInterval);
+      waitingStartInterval = null;
+      loadGame();
+    }
+  };
+  update();
+  waitingStartInterval = setInterval(update, 1000);
+}
+
 function startStormTimers() {
   if (stormTimerInterval) clearInterval(stormTimerInterval);
   stormTimerInterval = setInterval(() => {
-    const countdown = document.querySelector('[data-storm-countdown]');
-    if (countdown && currentStorm?.run_finished_at) {
-      countdown.textContent = formatStormDuration(secondsUntil(currentStorm.run_finished_at));
-    }
+    updateStormHeaderTimer();
 
     let shouldReload = false;
     (currentStorm?.tasks || []).forEach(task => {
@@ -840,7 +949,8 @@ async function buyMultitaskHint(subtaskId) {
 
   const response = await fetch(`/api/play/${pin}/multitask/subtask/${subtaskId}/hint/purchase`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" }
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task_id: currentTask ? currentTask.id : null })
   });
 
   const result = await response.json();
@@ -994,8 +1104,9 @@ function renderHintsAndAutoTransition(hints, task) {
   }
 
   const hasHints = hints.some(h => String(h.hint_type || "TIMED").toUpperCase() !== "NONE");
+  const taskAlreadyCompleted = Boolean(task.completed_at);
   const hasAutoTransition =
-    Number(task.auto_transition_minutes) > 0;
+    !taskAlreadyCompleted && Number(task.auto_transition_minutes) > 0;
 
   block.classList.remove("hidden");
 
@@ -1067,6 +1178,7 @@ function renderHintsAndAutoTransition(hints, task) {
 
 function renderHintsAndAutoState(hintsState, autoState, hasHints, hasAutoTransition) {
   const container = document.getElementById("hintsContent");
+  const isStorm = String(currentGameType || "LINEAR").toUpperCase() === "STORM";
 
   let hintsHtml = "";
 
@@ -1078,6 +1190,35 @@ function renderHintsAndAutoState(hintsState, autoState, hasHints, hasAutoTransit
     `;
   } else {
     hintsHtml += hintsState.map(hint => {
+      if (hint.hint_type === "PAID") {
+        if (hint.purchased) {
+          return `
+            <div class="hint">
+              <strong>Підказка №${hint.sort_order}:</strong>
+              <p>${escapeHtml(hint.content).replaceAll("\\n", "<br>")}</p>
+            </div>
+          `;
+        }
+
+        if (hint.remaining > 0) {
+          return `
+            <div class="hint-timer">
+              Кнопка купівлі підказки №${hint.sort_order} зʼявиться через:
+              <strong>${formatSeconds(hint.remaining)}</strong>
+            </div>
+          `;
+        }
+
+        const unit = isScoreModeValue(currentGameWinnerType) ? "балів" : "сек";
+        return `
+          <div class="hint-timer">
+            <button type="button" data-buy-standard-hint="${hint.id}">
+              Купити підказку №${hint.sort_order} за ${hint.purchase_value} ${unit}
+            </button>
+          </div>
+        `;
+      }
+
       if (hint.remaining > 0) {
         return `
           <div class="hint-timer">
@@ -1098,28 +1239,38 @@ function renderHintsAndAutoState(hintsState, autoState, hasHints, hasAutoTransit
 
   let autoHtml = "";
 
-  if (!hasAutoTransition) {
+  if (hasAutoTransition) {
+    const text = isStorm ? "До блокування завдання залишилось:" : "До автопереходу залишилось:";
+    autoHtml = `
+      <div class="hint-timer auto-transition-timer">
+        ${text}
+        <strong>${formatSeconds(autoState.remaining)}</strong>
+      </div>
+    `;
+  } else if (!isStorm) {
     autoHtml = `
       <div class="hint-timer">
         Автоперехід у цьому завданні не передбачений.
       </div>
     `;
-  } else {
-    autoHtml = `
-      <div class="hint-timer auto-transition-timer">
-        До автопереходу залишилось:
-        <strong>${formatSeconds(autoState.remaining)}</strong>
-      </div>
-    `;
   }
 
-  container.innerHTML = hintsHtml + autoHtml;
+  if (isStorm) {
+    const topTimer = document.getElementById("stormTaskAutoTimer");
+    if (topTimer) {
+      topTimer.innerHTML = autoHtml;
+      topTimer.classList.toggle("hidden", !autoHtml || selectedStormBriefing);
+    }
+    container.innerHTML = hintsHtml;
+  } else {
+    document.getElementById("stormTaskAutoTimer")?.classList.add("hidden");
+    container.innerHTML = hintsHtml + autoHtml;
+  }
 
   container.querySelectorAll('[data-buy-standard-hint]').forEach(button => {
     button.addEventListener('click', () => buyStandardHint(Number(button.dataset.buyStandardHint)));
   });
 }
-
 async function buyStandardHint(hintId) {
   const response = await fetch(`/api/play/${pin}/hint/${hintId}/purchase`, {
     method: "POST",
@@ -1142,7 +1293,8 @@ async function buyStandardHint(hintId) {
 }
 
 async function doAutoTransition() {
-  showPlainAnswerMessage("Час вийшов. Переходимо далі...", "neutral");
+  const isStorm = String(currentGameType || "LINEAR").toUpperCase() === "STORM";
+  showPlainAnswerMessage(isStorm ? "Час вийшов. Завдання блокується..." : "Час вийшов. Переходимо далі...", "neutral");
 
   const response = await fetch(`/api/play/${pin}/auto-transition`, {
     method: "POST",
@@ -1161,7 +1313,18 @@ async function doAutoTransition() {
     return;
   }
 
-  showPlainAnswerMessage(result.message || "Автоперехід виконано", "neutral");
+  showPlainAnswerMessage(result.message || (isStorm ? "Завдання заблоковано" : "Автоперехід виконано"), "neutral");
+
+  if (result.storm) {
+    currentStorm = result.storm;
+    const item = getStormTaskItem(currentTask?.id);
+    if (item) {
+      currentTask = item.task || currentTask;
+      renderStormTabs();
+      renderHintsAndAutoTransition(item.hints || [], currentTask);
+    }
+    return;
+  }
 
   setTimeout(() => {
     window.location.reload();

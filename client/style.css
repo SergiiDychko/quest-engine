@@ -2322,3 +2322,35 @@ th.selected-stat-column-cell {
 .storm-unlock-editor .hidden {
   display: none !important;
 }
+
+/* STORM patch 3 */
+.player-team-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.storm-header-timer {
+  font-weight: 700;
+  color: #e5e7eb;
+}
+
+.waiting-start-countdown {
+  margin: 12px 0 18px;
+  padding: 12px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+  font-weight: 700;
+}
+
+.storm-task-auto-timer {
+  margin: 8px 0 18px;
+}
+
+.storm-tab.auto-completed {
+  background: #e5e7eb;
+  border-color: #cbd5e1;
+  color: #374151;
+}
