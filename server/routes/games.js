@@ -36,6 +36,215 @@ function dbRun(sql, params = []) {
 }
 
 
+
+async function copyTaskToGame(sourceTaskId, targetGameId, options = {}) {
+  const sourceTask = await dbGet(`SELECT * FROM tasks WHERE id = ?`, [sourceTaskId]);
+  if (!sourceTask) {
+    const error = new Error("SOURCE_TASK_NOT_FOUND");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const sourceGame = await dbGet(`SELECT * FROM games WHERE id = ?`, [sourceTask.game_id]);
+  const targetGame = await dbGet(`SELECT * FROM games WHERE id = ?`, [targetGameId]);
+
+  if (!targetGame) {
+    const error = new Error("TARGET_GAME_NOT_FOUND");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const winnerChanged = String(sourceGame?.winner_type || "TIME").toUpperCase() !== String(targetGame.winner_type || "TIME").toUpperCase();
+  const nextOrderRow = await dbGet(
+    `SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM tasks WHERE game_id = ?`,
+    [targetGameId]
+  );
+
+  const isSameGame = Number(sourceTask.game_id) === Number(targetGameId);
+  const titlePrefix = options.titlePrefix === undefined ? (isSameGame ? "Копія — " : "") : options.titlePrefix;
+
+  const preservedUnlockType = String(sourceTask.unlock_type || "IMMEDIATE").toUpperCase();
+  const copiedUnlockType = preservedUnlockType === "TASK" ? "IMMEDIATE" : preservedUnlockType;
+
+  const newTaskResult = await dbRun(
+    `
+    INSERT INTO tasks (
+      game_id,
+      title,
+      task_type,
+      sort_order,
+      notes,
+      is_scored,
+      auto_transition_minutes,
+      auto_transition_penalty_seconds,
+      required_main_answers,
+      hide_answers_block,
+      score_points,
+      unlock_type,
+      unlock_delay_seconds,
+      unlock_task_id,
+      unlock_code
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      targetGameId,
+      `${titlePrefix || ""}${sourceTask.title || ""}`,
+      sourceTask.task_type || "STANDARD",
+      nextOrderRow?.next_order || 1,
+      sourceTask.notes || "",
+      sourceTask.is_scored === undefined ? 1 : sourceTask.is_scored,
+      sourceTask.auto_transition_minutes,
+      winnerChanged ? 0 : (Number(sourceTask.auto_transition_penalty_seconds) || 0),
+      sourceTask.required_main_answers,
+      sourceTask.hide_answers_block || 0,
+      winnerChanged ? 0 : (Number(sourceTask.score_points) || 0),
+      copiedUnlockType,
+      copiedUnlockType === "TIME" ? (Number(sourceTask.unlock_delay_seconds) || 0) : 0,
+      null,
+      copiedUnlockType === "CODE" ? (sourceTask.unlock_code || null) : null
+    ]
+  );
+
+  const newTaskId = newTaskResult.lastID;
+  const answerIdMap = new Map();
+
+  const content = await dbAll(`SELECT * FROM task_content WHERE task_id = ? ORDER BY sort_order ASC, id ASC`, [sourceTask.id]);
+  for (const block of content) {
+    await dbRun(
+      `INSERT INTO task_content (task_id, type, content, sort_order) VALUES (?, ?, ?, ?)`,
+      [newTaskId, block.type, block.content || "", block.sort_order]
+    );
+  }
+
+  const answers = await dbAll(`SELECT * FROM task_answers WHERE task_id = ? ORDER BY answer_type, sort_order, id`, [sourceTask.id]);
+  for (const answer of answers) {
+    const answerResult = await dbRun(
+      `
+      INSERT INTO task_answers (
+        task_id, answer_text, answer_type, description, time_modifier_seconds, comment, sort_order
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        newTaskId,
+        answer.answer_text || "",
+        answer.answer_type || "MAIN",
+        answer.description || "",
+        winnerChanged ? 0 : (Number(answer.time_modifier_seconds) || 0),
+        answer.comment || "",
+        answer.sort_order
+      ]
+    );
+    answerIdMap.set(Number(answer.id), answerResult.lastID);
+  }
+
+  const hints = await dbAll(`SELECT * FROM task_hints WHERE task_id = ? ORDER BY sort_order ASC, id ASC`, [sourceTask.id]);
+  for (const hint of hints) {
+    await dbRun(
+      `
+      INSERT INTO task_hints (
+        task_id, hint_type, show_after_seconds, purchase_after_seconds, purchase_value, content, sort_order
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        newTaskId,
+        hint.hint_type || "TIMED",
+        hint.show_after_seconds || 0,
+        hint.purchase_after_seconds || 0,
+        winnerChanged ? 0 : (Number(hint.purchase_value) || 0),
+        hint.content || "",
+        hint.sort_order
+      ]
+    );
+  }
+
+  const olympiadSettings = await dbGet(`SELECT * FROM olympiad_settings WHERE task_id = ?`, [sourceTask.id]);
+  if (olympiadSettings) {
+    await dbRun(
+      `
+      INSERT INTO olympiad_settings (
+        task_id, association_count, level_count, completion_type, required_cells_count, purchase_available_after_seconds
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      [
+        newTaskId,
+        olympiadSettings.association_count,
+        olympiadSettings.level_count,
+        olympiadSettings.completion_type,
+        olympiadSettings.required_cells_count,
+        olympiadSettings.purchase_available_after_seconds || 0
+      ]
+    );
+
+    const cells = await dbAll(`SELECT * FROM olympiad_cells WHERE task_id = ? ORDER BY cell_number ASC`, [sourceTask.id]);
+    for (const cell of cells) {
+      await dbRun(
+        `
+        INSERT INTO olympiad_cells (
+          task_id, cell_number, level_number, content, answer_text, comment, purchase_value, task_answer_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          newTaskId,
+          cell.cell_number,
+          cell.level_number,
+          cell.content || "",
+          cell.answer_text || "",
+          cell.comment || "",
+          winnerChanged ? 0 : (Number(cell.purchase_value) || 0),
+          answerIdMap.get(Number(cell.task_answer_id)) || null
+        ]
+      );
+    }
+  }
+
+  const multitaskSettings = await dbGet(`SELECT * FROM multitask_settings WHERE task_id = ?`, [sourceTask.id]);
+  if (multitaskSettings) {
+    await dbRun(
+      `INSERT INTO multitask_settings (task_id, completion_type, required_count) VALUES (?, ?, ?)`,
+      [newTaskId, multitaskSettings.completion_type || "ALL", multitaskSettings.required_count]
+    );
+
+    const subtasks = await dbAll(`SELECT * FROM multitask_subtasks WHERE task_id = ? ORDER BY sort_order ASC, id ASC`, [sourceTask.id]);
+    for (const subtask of subtasks) {
+      await dbRun(
+        `
+        INSERT INTO multitask_subtasks (
+          task_id, sort_order, content, answer_text, description, comment, hint_type,
+          hint_text, hint_after_seconds, hint_purchase_after_seconds, hint_purchase_value, task_answer_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          newTaskId,
+          subtask.sort_order,
+          subtask.content || "",
+          subtask.answer_text || "",
+          subtask.description || "",
+          subtask.comment || "",
+          subtask.hint_type || "NONE",
+          subtask.hint_text || "",
+          subtask.hint_after_seconds || 0,
+          subtask.hint_purchase_after_seconds || 0,
+          winnerChanged ? 0 : (Number(subtask.hint_purchase_value) || 0),
+          answerIdMap.get(Number(subtask.task_answer_id)) || null
+        ]
+      );
+    }
+  }
+
+  return {
+    id: newTaskId,
+    title: `${titlePrefix || ""}${sourceTask.title || ""}`,
+    task_type: sourceTask.task_type || "STANDARD",
+    sort_order: nextOrderRow?.next_order || 1
+  };
+}
+
 function defaultPage(pageType) {
   const defaults = {
     START: {
@@ -368,6 +577,88 @@ router.post("/:id/tasks", requireAuth, (req, res) => {
 });
 
 
+router.put("/:id/tasks/reorder", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.id);
+  const taskIds = Array.isArray(req.body?.task_ids)
+    ? req.body.task_ids.map(id => Number(id)).filter(Boolean)
+    : [];
+
+  if (!gameId || !taskIds.length) {
+    return res.status(400).json({ error: "Некоректний порядок завдань" });
+  }
+
+  try {
+    const existingTasks = await dbAll(
+      `SELECT id FROM tasks WHERE game_id = ? ORDER BY sort_order ASC, id ASC`,
+      [gameId]
+    );
+
+    const existingIds = existingTasks.map(task => Number(task.id));
+    const uniqueIds = [...new Set(taskIds)];
+
+    const isSameSet = existingIds.length === uniqueIds.length
+      && existingIds.every(id => uniqueIds.includes(id));
+
+    if (!isSameSet) {
+      return res.status(400).json({ error: "Список завдань не відповідає цій грі" });
+    }
+
+    await dbRun("BEGIN TRANSACTION");
+
+    for (let index = 0; index < uniqueIds.length; index += 1) {
+      await dbRun(
+        `UPDATE tasks SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND game_id = ?`,
+        [index + 1, uniqueIds[index], gameId]
+      );
+    }
+
+    await dbRun("COMMIT");
+
+    res.json({ message: "Порядок завдань оновлено" });
+  } catch (error) {
+    try { await dbRun("ROLLBACK"); } catch (rollbackError) {}
+    res.status(500).json({ error: "Помилка оновлення порядку завдань" });
+  }
+});
+
+router.post("/:id/tasks/:taskId/copy", requireAuth, async (req, res) => {
+  const sourceGameId = Number(req.params.id);
+  const sourceTaskId = Number(req.params.taskId);
+  const targetGameId = Number(req.body?.target_game_id);
+
+  if (!sourceGameId || !sourceTaskId || !targetGameId) {
+    return res.status(400).json({ error: "Некоректні дані для копіювання" });
+  }
+
+  try {
+    const task = await dbGet(
+      `SELECT id, game_id FROM tasks WHERE id = ? AND game_id = ?`,
+      [sourceTaskId, sourceGameId]
+    );
+
+    if (!task) {
+      return res.status(404).json({ error: "Завдання не знайдено в цій грі" });
+    }
+
+    await dbRun("BEGIN TRANSACTION");
+    const copiedTask = await copyTaskToGame(sourceTaskId, targetGameId);
+    await dbRun("COMMIT");
+
+    res.json({
+      message: "Завдання скопійовано",
+      task: copiedTask
+    });
+  } catch (error) {
+    try { await dbRun("ROLLBACK"); } catch (rollbackError) {}
+
+    if (error.statusCode === 404 || error.message === "TARGET_GAME_NOT_FOUND") {
+      return res.status(404).json({ error: "Цільову гру не знайдено" });
+    }
+
+    console.error(error);
+    res.status(500).json({ error: "Помилка копіювання завдання" });
+  }
+});
 
 router.delete("/:id", requireAuth, async (req, res) => {
   const gameId = Number(req.params.id);

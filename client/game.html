@@ -61,6 +61,7 @@ const gameId = params.get("id");
 let currentGame = null;
 let currentTasks = [];
 let currentPages = {};
+let availableGames = [];
 let activeTab = "START";
 let systemPageBuilder = null;
 
@@ -118,6 +119,18 @@ async function loadTasks() {
   }
 
   currentTasks = result.tasks || [];
+}
+
+async function loadAvailableGames() {
+  const response = await fetch("/api/games/catalog");
+  const result = await response.json();
+
+  if (!response.ok) {
+    availableGames = [];
+    return;
+  }
+
+  availableGames = result.games || [];
 }
 
 async function loadPages() {
@@ -480,10 +493,39 @@ async function saveGameStatus(options = {}) {
 
 function renderTaskTab(task) {
   const content = document.getElementById("tabContent");
+  const taskIndex = currentTasks.findIndex(item => Number(item.id) === Number(task.id));
+  const canMoveUp = taskIndex > 0;
+  const canMoveDown = taskIndex >= 0 && taskIndex < currentTasks.length - 1;
+  const gameOptions = availableGames.map(game => `
+    <option value="${Number(game.id)}" ${Number(game.id) === Number(gameId) ? "selected" : ""}>
+      ${escapeHtml(game.title || `Гра #${game.id}`)}${Number(game.id) === Number(gameId) ? " — ця гра" : ""}
+    </option>
+  `).join("");
 
   content.innerHTML = `
     <div class="info-block page-editor-block">
-      <h2>${escapeHtml(task.title || `Завдання ${task.sort_order}`)}</h2>
+      <div class="task-editor-header-row">
+        <div>
+          <h2>${escapeHtml(task.title || `Завдання ${task.sort_order}`)}</h2>
+          <p class="muted-text">Поточний порядок: ${Number(task.sort_order) || taskIndex + 1}</p>
+        </div>
+
+        <div class="task-management-panel">
+          <div class="task-order-controls">
+            <button id="moveTaskUpBtn" type="button" ${canMoveUp ? "" : "disabled"}>↑ Вище</button>
+            <button id="moveTaskDownBtn" type="button" ${canMoveDown ? "" : "disabled"}>↓ Нижче</button>
+          </div>
+
+          <div class="task-copy-controls">
+            <label for="copyTaskTargetSelect">Скопіювати в гру</label>
+            <select id="copyTaskTargetSelect">
+              ${gameOptions}
+            </select>
+            <button id="copyTaskBtn" type="button">Скопіювати завдання</button>
+            <span id="copyTaskMessage"></span>
+          </div>
+        </div>
+      </div>
 
       <iframe
         id="taskEditorFrame"
@@ -500,6 +542,18 @@ function renderTaskTab(task) {
     </div>
   `;
 
+  document.getElementById("moveTaskUpBtn")?.addEventListener("click", () => {
+    moveTask(task.id, -1);
+  });
+
+  document.getElementById("moveTaskDownBtn")?.addEventListener("click", () => {
+    moveTask(task.id, 1);
+  });
+
+  document.getElementById("copyTaskBtn")?.addEventListener("click", () => {
+    copyTask(task.id);
+  });
+
   document.getElementById("previewTaskPageBtn")?.addEventListener("click", () => {
     const frame = document.getElementById("taskEditorFrame");
     const previewFn = frame?.contentWindow?.previewTaskFromParent;
@@ -515,6 +569,79 @@ function renderTaskTab(task) {
   document.getElementById("saveTaskPageBtn").addEventListener("click", () => {
     saveTaskPageChanges();
   });
+}
+
+async function moveTask(taskId, direction) {
+  const index = currentTasks.findIndex(item => Number(item.id) === Number(taskId));
+  const targetIndex = index + direction;
+
+  if (index < 0 || targetIndex < 0 || targetIndex >= currentTasks.length) {
+    return;
+  }
+
+  const reordered = [...currentTasks];
+  const [task] = reordered.splice(index, 1);
+  reordered.splice(targetIndex, 0, task);
+
+  const response = await fetch(`/api/games/${gameId}/tasks/reorder`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      task_ids: reordered.map(item => Number(item.id))
+    })
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    alert(result.error || "Помилка зміни порядку завдань");
+    return;
+  }
+
+  await loadTasks();
+  activeTab = `TASK_${taskId}`;
+  render();
+}
+
+async function copyTask(taskId) {
+  const targetSelect = document.getElementById("copyTaskTargetSelect");
+  const message = document.getElementById("copyTaskMessage");
+  const targetGameId = Number(targetSelect?.value);
+
+  if (!targetGameId) {
+    message.className = "";
+    message.textContent = "Оберіть гру";
+    return;
+  }
+
+  const response = await fetch(`/api/games/${gameId}/tasks/${taskId}/copy`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      target_game_id: targetGameId
+    })
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    message.className = "";
+    message.textContent = result.error || "Помилка копіювання";
+    return;
+  }
+
+  message.className = "success-message";
+  message.textContent = "✓ Завдання скопійовано";
+
+  if (Number(targetGameId) === Number(gameId)) {
+    await loadTasks();
+    activeTab = `TASK_${result.task.id}`;
+    render();
+  }
 }
 
 async function saveTaskPageChanges() {
@@ -609,6 +736,7 @@ async function init() {
   await loadGame();
   await loadPages();
   await loadTasks();
+  await loadAvailableGames();
   render();
 }
 

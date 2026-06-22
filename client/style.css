@@ -2383,3 +2383,36 @@ th.selected-stat-column-cell {
 .clickable-row:hover td[onclick] {
   background: #f8fafc;
 }
+
+.task-editor-header-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.task-management-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 280px;
+  max-width: 420px;
+}
+
+.task-order-controls,
+.task-copy-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.task-copy-controls label {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.task-copy-controls select {
+  min-width: 220px;
+}
