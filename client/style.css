@@ -4921,3 +4921,262 @@ body:has(input[type="password"]):has(input[type="email"]) button {
   opacity: 0 !important;
   cursor: pointer !important;
 }
+
+/* =========================================================
+   Profile / password recovery pages — 2026-06-23
+   ========================================================= */
+.profile-page-card {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.profile-form-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-form-block label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: 700;
+  color: var(--heading-color);
+}
+
+.profile-form-block small {
+  color: var(--muted-color);
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.profile-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.profile-security-note {
+  margin-top: 14px;
+}
+
+.success-message {
+  color: #166534;
+  font-weight: 700;
+}
+
+.error-message {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.auth-page {
+  max-width: 560px;
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-secondary-link {
+  margin: 10px 0 0;
+}
+
+@media (max-width: 820px) {
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================================
+   FEATURE-005 polish — auth, profile and recovery mail
+   ========================================================= */
+body.auth-body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.auth-page,
+.login-page {
+  width: min(100%, 480px);
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.auth-card {
+  width: 100%;
+  padding: 28px;
+  border-radius: 18px;
+  box-shadow: 0 22px 70px rgba(15, 23, 42, 0.14);
+}
+
+.auth-card h1,
+.auth-card p {
+  text-align: center;
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-card input,
+.auth-card button {
+  width: 100%;
+}
+
+.profile-body {
+  padding: 24px;
+}
+
+.profile-page {
+  width: min(100%, 1120px);
+  max-width: 1120px;
+}
+
+.profile-page-card {
+  max-width: none;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.profile-page-card > h1,
+.profile-page-card > .muted-text {
+  text-align: center;
+}
+
+.profile-single-form {
+  margin-top: 18px;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: stretch;
+  margin-top: 18px;
+}
+
+.profile-form-block {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+}
+
+.profile-form-block label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-weight: 700;
+  color: var(--heading-color);
+}
+
+.profile-form-block input {
+  width: 100%;
+}
+
+.profile-form-block small {
+  color: var(--muted-color);
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.profile-account-info,
+.profile-security-note {
+  margin-top: 18px;
+  padding: 18px 20px;
+}
+
+.profile-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.profile-meta-grid > div {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.profile-meta-label {
+  display: block;
+  color: var(--muted-color);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.profile-main-actions {
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.profile-main-actions button {
+  min-width: 220px;
+}
+
+@media (max-width: 900px) {
+  .profile-grid,
+  .profile-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-page-card {
+    padding: 18px;
+  }
+}
+
+
+/* =========================================================
+   FIX — profile page desktop width after auth form selectors
+   ========================================================= */
+body.profile-body {
+  display: block !important;
+  align-items: initial !important;
+  justify-content: initial !important;
+  min-height: 100vh;
+  padding: 24px !important;
+}
+
+body.profile-body .app.profile-page {
+  width: min(100%, 1120px) !important;
+  max-width: 1120px !important;
+  margin: 0 auto !important;
+}
+
+body.profile-body .profile-page-card {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+body.profile-body .profile-meta-grid {
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+
+@media (max-width: 900px) {
+  body.profile-body {
+    padding: 14px !important;
+  }
+
+  body.profile-body .profile-meta-grid {
+    grid-template-columns: 1fr;
+  }
+}

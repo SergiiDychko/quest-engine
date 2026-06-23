@@ -6,16 +6,196 @@
   <title>Редагувати профіль</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <main class="app">
-    <section class="card">
+<body class="profile-body">
+  <main class="app profile-page">
+    <section class="card profile-page-card">
       <a href="/admin.html">← Назад</a>
       <h1>Редагувати профіль</h1>
-      <div class="info-block">
-        <p>Цей розділ підготовлений для наступного етапу.</p>
-        <p>Тут згодом будуть зміна пароля, аватарка, username та інші дані профілю.</p>
-      </div>
+      <p class="muted-text">Тут можна змінити логін, імʼя, email для відновлення доступу та пароль.</p>
+
+      <form id="profileForm" class="profile-single-form">
+        <div class="profile-grid">
+          <section class="info-block profile-form-block">
+            <h2>Дані профілю</h2>
+
+            <label>
+              <span>Імʼя / назва користувача</span>
+              <input id="profileName" type="text" autocomplete="name" required>
+            </label>
+
+            <label>
+              <span>Логін</span>
+              <input id="profileUsername" type="text" autocomplete="username" required>
+              <small>Латинські літери, цифри, крапка, дефіс або нижнє підкреслення. Мінімум 3 символи.</small>
+            </label>
+
+            <label>
+              <span>Email для відновлення пароля</span>
+              <input id="profileRecoveryEmail" type="email" autocomplete="email" placeholder="name@example.com">
+              <small>На цю адресу надсилатиметься посилання для відновлення пароля.</small>
+            </label>
+          </section>
+
+          <section class="info-block profile-form-block">
+            <h2>Безпека</h2>
+
+            <label>
+              <span>Поточний пароль</span>
+              <input id="currentPassword" type="password" autocomplete="current-password" required>
+              <small>Потрібен для підтвердження будь-яких змін у профілі.</small>
+            </label>
+
+            <label>
+              <span>Новий пароль</span>
+              <input id="newPassword" type="password" autocomplete="new-password">
+              <small>Залиште порожнім, якщо не хочете змінювати пароль. Мінімум 8 символів, літери й цифри.</small>
+            </label>
+
+            <label>
+              <span>Повторіть новий пароль</span>
+              <input id="repeatPassword" type="password" autocomplete="new-password">
+            </label>
+          </section>
+        </div>
+
+        <section class="info-block profile-account-info">
+          <h2>Обліковий запис</h2>
+          <div class="profile-meta-grid">
+            <div>
+              <span class="profile-meta-label">Роль</span>
+              <strong id="profileRole">—</strong>
+            </div>
+            <div>
+              <span class="profile-meta-label">Дата створення</span>
+              <strong id="profileCreatedAt">—</strong>
+            </div>
+            <div>
+              <span class="profile-meta-label">Останній вхід</span>
+              <strong id="profileLastLoginAt">—</strong>
+            </div>
+            <div>
+              <span class="profile-meta-label">Пошта відновлення</span>
+              <strong id="profileMailStatus">—</strong>
+            </div>
+          </div>
+        </section>
+
+        <div class="profile-actions-row profile-main-actions">
+          <button id="saveProfileButton" type="submit">Зберегти зміни</button>
+          <span id="profileMessage"></span>
+        </div>
+      </form>
+
     </section>
   </main>
+
+  <script>
+    let profileSubmitting = false;
+
+    function setMessage(text, ok = false) {
+      const element = document.getElementById("profileMessage");
+      element.textContent = text || "";
+      element.className = ok ? "success-message" : "error-message";
+    }
+
+    function setFormDisabled(disabled) {
+      document.querySelectorAll("#profileForm input, #profileForm button").forEach(element => {
+        element.disabled = disabled;
+      });
+    }
+
+    async function readJson(response) {
+      try { return await response.json(); } catch (error) { return {}; }
+    }
+
+    function formatDate(value) {
+      if (!value) return "—";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString("uk-UA", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    }
+
+    async function loadProfile() {
+      const response = await fetch("/api/auth/profile");
+      const result = await readJson(response);
+
+      if (!response.ok || !result.user) {
+        window.location.href = "/login.html";
+        return;
+      }
+
+      document.getElementById("profileName").value = result.user.name || "";
+      document.getElementById("profileUsername").value = result.user.username || result.user.email || "";
+      document.getElementById("profileRecoveryEmail").value = result.user.recovery_email || "";
+      document.getElementById("profileRole").textContent = result.user.role || "—";
+      document.getElementById("profileCreatedAt").textContent = formatDate(result.user.created_at);
+      document.getElementById("profileLastLoginAt").textContent = formatDate(result.user.last_login_at);
+
+      const mailResponse = await fetch("/api/auth/mail-status");
+      const mailResult = await readJson(mailResponse);
+      document.getElementById("profileMailStatus").textContent = mailResult.configured
+        ? "SMTP налаштовано"
+        : "SMTP ще не налаштовано";
+    }
+
+    document.getElementById("profileForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      if (profileSubmitting) return;
+
+      profileSubmitting = true;
+      setFormDisabled(true);
+      setMessage("Зберігаю...");
+
+      try {
+        const response = await fetch("/api/auth/profile", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: document.getElementById("profileName").value.trim(),
+            username: document.getElementById("profileUsername").value.trim(),
+            recovery_email: document.getElementById("profileRecoveryEmail").value.trim(),
+            current_password: document.getElementById("currentPassword").value,
+            new_password: document.getElementById("newPassword").value,
+            repeat_password: document.getElementById("repeatPassword").value
+          })
+        });
+
+        const result = await readJson(response);
+
+        if (!response.ok) {
+          setMessage(result.error || "Помилка збереження змін");
+          return;
+        }
+
+        document.getElementById("currentPassword").value = "";
+        document.getElementById("newPassword").value = "";
+        document.getElementById("repeatPassword").value = "";
+        setMessage(result.message || "Зміни збережено", true);
+
+        if (result.relogin_required) {
+          setTimeout(() => {
+            window.location.href = "/login.html";
+          }, 1200);
+          return;
+        }
+
+        await loadProfile();
+      } catch (error) {
+        console.error(error);
+        setMessage("Не вдалося зберегти зміни. Перевірте, чи сервер запущений.");
+      } finally {
+        profileSubmitting = false;
+        setFormDisabled(false);
+      }
+    });
+
+    loadProfile();
+  </script>
 </body>
 </html>

@@ -14,15 +14,21 @@ const pagesRoutes = require("./routes/pages");
 const uploadRoutes = require("./routes/uploads");
 
 const app = express();
-const PORT = 3000;
+app.set("trust proxy", 1);
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: "70mb" }));
 
 app.use(
   session({
-    secret: "quest-engine-dev-secret",
+    secret: process.env.SESSION_SECRET || "quest-engine-dev-secret",
     resave: false,
-    saveUninitialized: false
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production"
+    }
   })
 );
 

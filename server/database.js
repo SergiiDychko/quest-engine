@@ -10,10 +10,16 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
+      username TEXT UNIQUE,
       email TEXT NOT NULL UNIQUE,
+      recovery_email TEXT,
       password_hash TEXT NOT NULL,
+      reset_token_hash TEXT,
+      reset_token_expires_at TEXT,
       role TEXT NOT NULL CHECK(role IN ('ADMIN', 'AUTHOR', 'MODERATOR')),
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_login_at TEXT
     )
   `);
 
@@ -324,6 +330,17 @@ db.run(`
       FOREIGN KEY (task_answer_id) REFERENCES task_answers(id)
     )
   `);
+
+  // Lightweight migrations for profile/auth fields.
+  db.run(`ALTER TABLE users ADD COLUMN username TEXT`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN recovery_email TEXT`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN reset_token_hash TEXT`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN reset_token_expires_at TEXT`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN updated_at TEXT`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN last_login_at TEXT`, () => {});
+  db.run(`UPDATE users SET username = email WHERE username IS NULL OR username = ''`, () => {});
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL AND username <> ''`, () => {});
+  db.run(`CREATE INDEX IF NOT EXISTS idx_users_reset_token_hash ON users(reset_token_hash)`, () => {});
 
   // Lightweight migrations for newer task mechanics.
 

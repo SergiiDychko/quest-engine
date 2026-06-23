@@ -6,10 +6,10 @@
     <title>Quest Engine - Вхід</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="auth-body">
 
-<div class="container">
-    <div class="card">
+<main class="app auth-page login-page">
+    <section class="card auth-card">
 
         <h1>Quest Engine</h1>
 
@@ -18,9 +18,10 @@
         <form id="loginForm">
 
             <input
-                type="email"
-                id="email"
-                placeholder="Email"
+                type="text"
+                id="identifier"
+                placeholder="Логін або email"
+                autocomplete="username"
                 required
             >
 
@@ -28,6 +29,7 @@
                 type="password"
                 id="password"
                 placeholder="Пароль"
+                autocomplete="current-password"
                 required
             >
 
@@ -37,10 +39,12 @@
 
         </form>
 
+        <p class="auth-secondary-link"><a href="/forgot-password.html">Забули пароль?</a></p>
+
         <div id="message"></div>
 
-    </div>
-</div>
+    </section>
+</main>
 
 <script>
 document
@@ -49,8 +53,8 @@ document
 
         e.preventDefault();
 
-        const email =
-            document.getElementById("email").value;
+        const identifier =
+            document.getElementById("identifier").value;
 
         const password =
             document.getElementById("password").value;
@@ -63,7 +67,7 @@ document
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                    email,
+                    identifier,
                     password
                 })
             }
