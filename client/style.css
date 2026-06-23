@@ -1529,34 +1529,49 @@ th.selected-stat-column-cell {
 }
 
 .section-settings {
-  padding: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  align-items: center;
+  padding: 10px 12px;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
   background: #ffffff;
   margin-bottom: 12px;
 }
 
-.section-column-count-row {
+.section-settings > label,
+.section-width-settings label {
   display: flex;
   gap: 8px;
   align-items: center;
-  max-width: 320px;
+  margin: 0;
+  white-space: nowrap;
 }
 
-.section-column-count-row input {
-  width: 90px;
+.section-column-count-row {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.section-column-count-row input,
+.section-width-settings input {
+  width: 86px;
 }
 
 .section-width-settings {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
-  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: center;
+  margin: 0;
 }
 
 .section-sum {
-  margin-top: 8px;
+  margin: 0 0 0 auto;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .builder-section-columns {
@@ -1646,6 +1661,20 @@ th.selected-stat-column-cell {
 }
 
 @media (max-width: 760px) {
+  .section-settings {
+    align-items: stretch;
+  }
+
+  .section-settings > label,
+  .section-width-settings,
+  .section-width-settings label {
+    width: 100%;
+  }
+
+  .section-sum {
+    margin-left: 0;
+  }
+
   .builder-section-columns,
   .content-section-block {
     flex-direction: column;
@@ -2415,4 +2444,2480 @@ th.selected-stat-column-cell {
 
 .task-copy-controls select {
   min-width: 220px;
+}
+
+/* FEATURE-003: task editor UX polish */
+.draft-status {
+  margin-left: auto;
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.draft-status[data-state="dirty"] {
+  color: #b45309;
+}
+
+.draft-status[data-state="clean"] {
+  color: #047857;
+}
+
+.draft-restore-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #fbbf24;
+  background: #fffbeb;
+  color: #78350f;
+}
+
+.draft-restore-banner.hidden {
+  display: none !important;
+}
+
+.draft-restore-banner button {
+  width: auto;
+  padding: 6px 10px;
+}
+
+.task-settings-header {
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.task-name-row,
+.task-type-row,
+.task-actions-row,
+.task-score-row {
+  margin-bottom: 6px;
+}
+
+.task-name-row {
+  flex-wrap: wrap;
+}
+
+.task-name-input {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.task-type-row select {
+  max-width: 360px;
+}
+
+.task-actions-row {
+  justify-content: flex-end;
+}
+
+.tab-panel h2,
+.tab-panel h3,
+.info-block h3,
+.multitask-subtask-card h4 {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.codes-table {
+  margin-top: 8px;
+}
+
+.codes-table th,
+.codes-table td {
+  padding: 5px 6px;
+}
+
+.codes-table input,
+.standard-hint-card input,
+.standard-hint-card select,
+.standard-hint-card textarea,
+.olympiad-cells-table input,
+.multitask-subtask-card input,
+.multitask-subtask-card select,
+.multitask-subtask-card textarea {
+  font-size: 14px;
+  padding: 6px 8px;
+}
+
+.standard-hint-card {
+  padding: 10px;
+}
+
+.standard-hint-card label {
+  margin: 6px 0;
+}
+
+.standard-hint-card button,
+#addCodesBtn,
+#saveAllCodesBtn,
+#saveOlympiadBtn,
+#regenerateOlympiadBtn,
+#addMultitaskSubtaskBtn {
+  width: auto;
+  padding: 7px 12px;
+}
+
+.multitask-code-grid,
+.multitask-hint-fields {
+  gap: 8px;
+}
+
+.multitask-subtask-body h4 {
+  font-size: 14px;
+  color: #334155;
+}
+
+.olympiad-settings-list {
+  gap: 6px;
+}
+
+.olympiad-setting-row {
+  min-height: auto;
+}
+
+@media (max-width: 760px) {
+  .draft-status {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .task-type-row,
+  .task-actions-row,
+  .task-score-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+
+/* =========================================================
+   UI SYSTEM REFRESH — 2026-06-23
+   Safe CSS-only layer. JS visibility hooks remain intact:
+   .hidden, .modal-backdrop.hidden, .draft-restore-banner.hidden,
+   .multitask-* .hidden, .storm-unlock-editor .hidden.
+   ========================================================= */
+
+:root {
+  --bg-color: #f5f7fb;
+  --surface: #ffffff;
+  --surface-soft: #f8fafc;
+  --surface-muted: #eef2f7;
+  --card-color: #ffffff;
+  --text-color: #172033;
+  --heading-color: #0f172a;
+  --muted-color: #64748b;
+  --border-color: #d8e0ea;
+  --border-strong: #b8c3d2;
+  --accent-color: #2563eb;
+  --accent-soft: #dbeafe;
+  --accent-hover: #1d4ed8;
+  --success-color: #15803d;
+  --success-soft: #dcfce7;
+  --warning-color: #b45309;
+  --warning-soft: #fef3c7;
+  --danger-color: #b42318;
+  --danger-soft: #fee4e2;
+  --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.16);
+  --shadow-card: 0 10px 30px rgba(15, 23, 42, 0.07);
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --control-h: 34px;
+}
+
+html {
+  background: var(--bg-color);
+  color: var(--text-color);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  padding: 18px;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  background:
+    radial-gradient(circle at 0 0, rgba(37, 99, 235, 0.08), transparent 32rem),
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  color: var(--text-color);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.app,
+.game-layout {
+  width: min(100%, 1180px);
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.app:has(.statistics-table-wrapper),
+.public-statistics-page .app,
+.public-statistics-card,
+.public-statistics-page .card {
+  width: 100%;
+  max-width: none;
+}
+
+.card,
+.info-block,
+.hints-block,
+.admin-dashboard-block,
+.task-settings-header,
+.bulk-actions-panel,
+.builder-block,
+.multitask-settings-block,
+.multitask-subtask-card,
+.storm-briefing,
+.waiting-start-countdown,
+.all-runs-archive-block {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.card {
+  padding: 18px;
+}
+
+.info-block,
+.hints-block,
+.admin-dashboard-block,
+.task-settings-header,
+.bulk-actions-panel,
+.storm-briefing,
+.waiting-start-countdown,
+.all-runs-archive-block {
+  padding: 14px;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--heading-color);
+  letter-spacing: -0.02em;
+  line-height: 1.18;
+}
+
+h1 { font-size: clamp(24px, 3vw, 34px); margin: 0 0 10px; }
+h2 { font-size: clamp(19px, 2vw, 25px); margin: 0 0 10px; }
+h3 { font-size: 17px; margin: 0 0 8px; }
+h4 { font-size: 15px; margin: 0 0 8px; }
+
+p,
+.muted-text,
+.public-statistics-meta,
+.task-time-details,
+.stat-empty,
+.multitask-answer-format,
+.multitask-hint-wait,
+.multitask-hint-text,
+.storm-countdown {
+  color: var(--muted-color);
+}
+
+a { color: var(--accent-color); }
+a:hover { color: var(--accent-hover); }
+
+input,
+select,
+textarea {
+  min-height: var(--control-h);
+  padding: 7px 9px;
+  margin: 3px 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  color: var(--text-color);
+  font: inherit;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+}
+
+textarea { line-height: 1.45; }
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible,
+.help-tooltip:focus-visible,
+.help-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: var(--focus-ring);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  min-height: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent-color);
+}
+
+input[type="number"],
+#requiredMainAnswers,
+#codesCount,
+.task-score-row input,
+.auto-row input[type="number"],
+.olympiad-setting-row input[type="number"] {
+  width: 96px;
+}
+
+button,
+.button,
+.large-action-btn,
+.small-btn,
+.small-light-btn,
+.icon-btn,
+.tab-btn,
+.game-page-tab,
+.filter-btn,
+.storm-tab,
+.public-statistics-view-toggle .toggle-btn,
+.olympiad-edit-content-btn,
+.multitask-buy-hint-btn,
+.olympiad-buy-btn {
+  min-height: var(--control-h);
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  color: var(--text-color);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.15;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.08s ease, box-shadow 0.14s ease;
+}
+
+button:hover,
+.button:hover,
+.large-action-btn:hover,
+.small-btn:hover,
+.small-light-btn:hover,
+.icon-btn:hover,
+.tab-btn:hover,
+.game-page-tab:hover,
+.filter-btn:hover,
+.storm-tab:hover,
+.public-statistics-view-toggle .toggle-btn:hover,
+.olympiad-edit-content-btn:hover,
+.multitask-buy-hint-btn:hover,
+.olympiad-buy-btn:hover {
+  opacity: 1;
+  background: var(--surface-soft);
+  border-color: var(--border-strong);
+  color: var(--heading-color);
+}
+
+button:active { transform: translateY(1px); }
+button:disabled,
+.storm-tab.locked {
+  cursor: not-allowed;
+  opacity: 0.62;
+  box-shadow: none;
+}
+
+.large-action-btn {
+  padding: 7px 12px;
+  font-size: 14px;
+}
+
+.small-btn,
+.delete-code-btn,
+.builder-column-toolbar button,
+.tiptap-toolbar button,
+.standard-hint-card button,
+#addCodesBtn,
+#saveAllCodesBtn,
+#saveOlympiadBtn,
+#regenerateOlympiadBtn,
+#addMultitaskSubtaskBtn {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 13px;
+}
+
+.icon-btn,
+.small-light-btn,
+.help-btn,
+.help-icon {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+}
+
+.danger-btn,
+.delete-code-btn,
+button[id*="delete"],
+button[id*="Delete"],
+button[onclick^="delete"],
+button[data-action="delete"],
+button[data-editor-action="deleteTable"] {
+  background: var(--danger-soft);
+  border-color: #f5b7b1;
+  color: var(--danger-color);
+}
+
+.danger-btn:hover,
+.delete-code-btn:hover,
+button[id*="delete"]:hover,
+button[id*="Delete"]:hover,
+button[onclick^="delete"]:hover,
+button[data-action="delete"]:hover,
+button[data-editor-action="deleteTable"]:hover {
+  background: #ffd7d2;
+  border-color: #ea9288;
+  color: #8f1d14;
+}
+
+button[id*="save"],
+button[id*="Save"],
+#submitAnswerBtn,
+#createGameBtn,
+#createRunBtn,
+#joinBtn,
+#loginBtn,
+#registerBtn,
+#savePageBtn,
+#saveTaskBtn,
+#saveAllCodesBtn,
+#saveOlympiadBtn,
+#saveStatusBtn,
+#forcePublishBtn:not(.danger-btn) {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #ffffff;
+}
+
+button[id*="save"]:hover,
+button[id*="Save"]:hover,
+#submitAnswerBtn:hover,
+#createGameBtn:hover,
+#createRunBtn:hover,
+#joinBtn:hover,
+#loginBtn:hover,
+#registerBtn:hover,
+#savePageBtn:hover,
+#saveTaskBtn:hover,
+#saveAllCodesBtn:hover,
+#saveOlympiadBtn:hover,
+#saveStatusBtn:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #ffffff;
+}
+
+.tabs,
+.game-page-tabs,
+.storm-tabs,
+.catalog-filters,
+.admin-dashboard-actions,
+.builder-toolbar,
+.builder-block-actions,
+.builder-column-toolbar,
+.task-order-controls,
+.task-copy-controls,
+.add-task-row,
+.save-row,
+.public-link-row,
+.modal-actions,
+.copy-game-actions {
+  gap: 8px;
+}
+
+.tabs,
+.game-page-tabs,
+.storm-tabs {
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0;
+}
+
+.tab-btn,
+.game-page-tab,
+.filter-btn,
+.storm-tab,
+.public-statistics-view-toggle .toggle-btn {
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.tab-btn.active,
+.game-page-tab.active,
+.filter-btn.active,
+.storm-tab.active,
+.public-statistics-view-toggle .toggle-btn.active {
+  background: #ffffff;
+  color: var(--accent-color);
+  border-color: var(--border-color);
+  border-bottom-color: #ffffff;
+  box-shadow: 0 -1px 0 #ffffff inset;
+}
+
+.filter-row .filter-btn,
+.catalog-filters .filter-btn {
+  border-radius: 999px;
+}
+
+.storm-tab.completed,
+.olympiad-cell.found,
+.multitask-subtask-player.done {
+  background: var(--success-soft);
+  border-color: #86efac;
+  color: var(--success-color);
+}
+
+.storm-tab.auto-completed {
+  background: var(--surface-muted);
+  border-color: var(--border-color);
+  color: #475569;
+}
+
+.codes-table,
+.statistics-table,
+.public-statistics-table,
+.olympiad-cells-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+}
+
+.codes-table th,
+.codes-table td,
+.statistics-table th,
+.statistics-table td,
+.public-statistics-table th,
+.public-statistics-table td,
+.olympiad-cells-table th,
+.olympiad-cells-table td {
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  padding: 7px 9px;
+}
+
+.codes-table tr:last-child td,
+.statistics-table tr:last-child td,
+.public-statistics-table tr:last-child td,
+.olympiad-cells-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.codes-table th:last-child,
+.codes-table td:last-child,
+.statistics-table th:last-child,
+.statistics-table td:last-child,
+.public-statistics-table th:last-child,
+.public-statistics-table td:last-child,
+.olympiad-cells-table th:last-child,
+.olympiad-cells-table td:last-child {
+  border-right: 0;
+}
+
+.codes-table th,
+.statistics-table th,
+.public-statistics-table th,
+.olympiad-cells-table th {
+  background: var(--surface-soft);
+  color: var(--heading-color);
+  font-weight: 700;
+}
+
+.teams-table-wrapper,
+.statistics-table-wrapper,
+.public-statistics-table-wrapper,
+.olympiad-table-wrap,
+.olympiad-cells-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius-md);
+}
+
+.builder-block {
+  overflow: hidden;
+}
+
+.builder-block-header,
+.tiptap-toolbar,
+.section-settings,
+.builder-preview,
+.builder-empty,
+.registration-preview-box,
+.multitask-subtask-preview,
+.olympiad-editor-cell-preview {
+  background: var(--surface-soft);
+  border-color: var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.builder-block-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.builder-block-body {
+  padding: 12px;
+}
+
+.tiptap-toolbar button,
+.tiptap-color-label {
+  border-radius: var(--radius-sm);
+}
+
+.tiptap-editor,
+.content-html-frame,
+.task-editor-frame {
+  border-color: var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.hint,
+.hint-timer,
+.auto-transition-timer,
+.olympiad-purchase-timer,
+.olympiad-purchase-ready,
+.multitask-hint-text,
+.multitask-hint-wait {
+  border-radius: var(--radius-md);
+}
+
+.hint {
+  background: var(--accent-soft);
+  border: 1px solid #bfdbfe;
+  color: #1e3a8a;
+}
+
+.hint-timer {
+  padding: 10px 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border-color);
+}
+
+.help-icon,
+.help-btn,
+.codes-table span[title] {
+  background: var(--surface-soft);
+  color: var(--muted-color);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.help-tooltip-text,
+.help-btn:hover::after,
+.help-btn:focus::after {
+  background: #111827;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.25);
+  font-weight: 500;
+}
+
+.modal-backdrop,
+.copy-game-modal {
+  background: rgba(15, 23, 42, 0.56);
+  backdrop-filter: blur(6px);
+}
+
+.modal-card,
+.copy-game-dialog {
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 26px 80px rgba(15, 23, 42, 0.28);
+}
+
+.fixed-answer-wrapper {
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 10px 34px rgba(15, 23, 42, 0.22);
+}
+
+.fixed-answer-wrapper .fixed-answer-bar,
+.fixed-answer-bar {
+  max-width: 920px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.player-team-row {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #e5e7eb;
+}
+
+.player-team-row strong,
+.storm-header-timer {
+  color: #ffffff;
+}
+
+.fixed-answer-bar input {
+  min-width: 0;
+  margin: 0;
+}
+
+.fixed-answer-bar button {
+  white-space: nowrap;
+  margin: 0;
+}
+
+#answerMessage {
+  max-width: 920px;
+  margin: 6px auto 0;
+  min-height: 18px;
+}
+
+.game-layout {
+  max-width: 920px;
+  padding-top: 108px;
+}
+
+.player-service-page .task-card,
+.task-card {
+  margin-bottom: 60px;
+}
+
+.task-content,
+.content-text-block,
+.tiptap-rendered-content {
+  line-height: 1.65;
+}
+
+.task-management-panel {
+  background: var(--surface-soft);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 10px;
+}
+
+.draft-restore-banner {
+  border-radius: var(--radius-md);
+  border-color: #fbbf24;
+  background: var(--warning-soft);
+}
+
+.editor-sticky-actions {
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  backdrop-filter: blur(12px);
+}
+
+.success-message,
+.success-text,
+.answer-success,
+.accepted-answer,
+.task-main-time,
+.stat-bonus,
+.stat-bonus-small,
+.olympiad-found-answer,
+.multitask-found-comment {
+  color: var(--success-color) !important;
+}
+
+.error-text,
+.answer-error,
+.accepted-penalty-answer,
+.stat-penalty,
+.stat-penalty-small {
+  color: var(--danger-color) !important;
+}
+
+.in-progress-text,
+.draft-status[data-state="dirty"] {
+  color: var(--warning-color) !important;
+}
+
+.selected-stat-row-cell,
+.selected-stat-column-cell,
+.selected-stat-row td {
+  background-color: #edf5ff !important;
+}
+
+.selected-stat-cell {
+  background-color: #dceeff !important;
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+
+.clickable-row:hover td,
+.clickable-stat-cell:hover {
+  background: var(--surface-soft);
+}
+
+/* Preserve visibility behaviour controlled by JS. */
+.hidden,
+.modal-backdrop.hidden,
+.draft-restore-banner.hidden,
+.task-score-row.hidden,
+.standard-hint-card [data-standard-timed-field].hidden,
+.standard-hint-card [data-standard-paid-field].hidden,
+.standard-hint-card label.hidden,
+.multitask-setting-row label.hidden,
+.multitask-hint-fields.hidden,
+.multitask-hint-fields label.hidden,
+.storm-unlock-editor .hidden {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  body {
+    padding: 12px;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  .form-row,
+  .task-name-row,
+  .task-type-row,
+  .task-actions-row,
+  .task-score-row,
+  .multitask-setting-row,
+  .add-codes-row,
+  .auto-row,
+  .public-link-row,
+  .storm-briefing-header,
+  .task-editor-header-row {
+    align-items: stretch;
+  }
+
+  .form-row label,
+  .form-row input[type="text"],
+  .form-row input[type="date"],
+  .form-row input[type="time"],
+  .form-row select,
+  .create-run-form input[type="date"],
+  .create-run-form input[type="time"],
+  .task-name-input,
+  .task-type-row select,
+  .task-copy-controls select,
+  .task-management-panel,
+  .game-status-inline select {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .save-row,
+  .modal-actions,
+  .copy-game-actions {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --control-h: 36px;
+  }
+
+  body {
+    padding: 8px;
+    font-size: 14px;
+  }
+
+  .app,
+  .game-layout {
+    width: 100%;
+  }
+
+  .card,
+  .info-block,
+  .hints-block,
+  .admin-dashboard-block,
+  .task-settings-header,
+  .bulk-actions-panel,
+  .builder-block-body,
+  .multitask-settings-block,
+  .multitask-subtask-card {
+    padding: 12px;
+    border-radius: var(--radius-md);
+  }
+
+  .admin-dashboard-actions,
+  .builder-toolbar,
+  .builder-block-actions,
+  .task-order-controls,
+  .task-copy-controls,
+  .add-task-row,
+  .save-row,
+  .modal-actions,
+  .copy-game-actions,
+  .filter-row {
+    align-items: stretch;
+  }
+
+  .admin-dashboard-actions a,
+  .admin-dashboard-actions button,
+  .builder-toolbar button,
+  .task-order-controls button,
+  .task-copy-controls button,
+  .add-task-row button,
+  .save-row button,
+  .modal-actions button,
+  .copy-game-actions button,
+  .filter-row button {
+    width: 100%;
+  }
+
+  .tabs,
+  .game-page-tabs,
+  .storm-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 6px;
+    scrollbar-width: thin;
+  }
+
+  .tab-btn,
+  .game-page-tab,
+  .storm-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    border-radius: 999px;
+  }
+
+  .tab-btn.active,
+  .game-page-tab.active,
+  .storm-tab.active {
+    border-bottom-color: var(--border-color);
+  }
+
+  .fixed-answer-wrapper {
+    padding: 8px;
+  }
+
+  .fixed-answer-wrapper .fixed-answer-bar,
+  .fixed-answer-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .fixed-answer-bar button,
+  .fixed-answer-bar input {
+    width: 100%;
+  }
+
+  .game-layout {
+    padding-top: 150px;
+  }
+
+  .help-tooltip-text {
+    left: auto;
+    right: 0;
+    transform: none;
+    max-width: min(78vw, 340px);
+  }
+
+  .codes-table th,
+  .codes-table td,
+  .statistics-table th,
+  .statistics-table td,
+  .public-statistics-table th,
+  .public-statistics-table td {
+    padding: 6px 7px;
+    font-size: 13px;
+  }
+
+  .task-editor-frame {
+    height: 760px;
+  }
+}
+
+/* =========================================================
+   AGREED UI PATCH — compact editor, player cards, mobile tabs, login
+   Added after UI SYSTEM REFRESH so it safely overrides previous rules.
+   ========================================================= */
+
+/* [UI-001] Compact task editor header / controls */
+.task-editor-header-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(420px, auto);
+  gap: 10px 14px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+
+.task-editor-header-row > div:first-child,
+.task-editor-header-row > header:first-child,
+.task-editor-header-row > section:first-child {
+  min-width: 0;
+}
+
+.task-editor-header-row h1,
+.task-editor-header-row h2 {
+  margin-bottom: 4px;
+}
+
+.task-editor-header-row p {
+  margin: 0;
+}
+
+.task-management-panel {
+  max-width: none;
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(240px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  box-shadow: none;
+}
+
+.task-order-controls,
+.task-copy-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: nowrap;
+  margin: 0;
+}
+
+.task-order-controls button,
+.task-copy-controls button {
+  min-height: 30px;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+
+.task-copy-controls label {
+  margin: 0;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.task-copy-controls select {
+  min-width: 180px;
+  width: min(100%, 340px);
+  height: 30px;
+  min-height: 30px;
+  margin: 0;
+}
+
+.task-settings-header {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.2fr) minmax(220px, 0.8fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  box-shadow: none;
+}
+
+.task-name-row,
+.task-type-row,
+.task-actions-row,
+.task-score-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+.task-name-row label,
+.task-type-row label {
+  white-space: nowrap;
+  margin: 0;
+}
+
+.task-name-input {
+  flex: 1 1 220px;
+  min-width: 160px;
+  max-width: none;
+  margin: 0;
+}
+
+.task-type-row select {
+  width: 100%;
+  max-width: 340px;
+  margin: 0;
+}
+
+.draft-status {
+  justify-self: end;
+  margin-left: 0;
+}
+
+.task-actions-row {
+  justify-content: flex-end;
+}
+
+.task-actions-row .danger-btn,
+.task-actions-row button {
+  white-space: nowrap;
+}
+
+/* [UI-002] Player answer bar: align team/timer row with answer input row */
+.fixed-answer-wrapper {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.fixed-answer-wrapper .fixed-answer-bar,
+.fixed-answer-bar,
+#answerMessage {
+  width: min(100%, 920px);
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.fixed-answer-wrapper .fixed-answer-bar,
+.fixed-answer-bar {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+}
+
+.player-team-row {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+}
+
+/* [UI-003] Player task content card should match Answers and Hints cards */
+.game-layout .task-content {
+  margin-top: 0;
+  margin-bottom: 12px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.game-layout .task-content > :first-child {
+  margin-top: 0;
+}
+
+.game-layout .task-content > :last-child {
+  margin-bottom: 0;
+}
+
+.game-layout .info-block,
+.game-layout .hints-block {
+  margin-top: 12px;
+}
+
+/* [UI-004] Mobile task tabs: CSS-only compact menu fallback.
+   Shows burger + active tab; expands list on tap/focus/hover. */
+@media (max-width: 640px) {
+  .tabs,
+  .game-page-tabs,
+  .storm-tabs {
+    position: relative;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 8px;
+    align-items: stretch;
+    overflow: visible;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: var(--shadow-card);
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar,
+  .game-page-tabs::-webkit-scrollbar,
+  .storm-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tabs::before,
+  .game-page-tabs::before,
+  .storm-tabs::before {
+    content: "☰";
+    grid-column: 1;
+    grid-row: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--surface-soft);
+    color: var(--heading-color);
+    font-weight: 800;
+  }
+
+  .tabs > button,
+  .game-page-tabs > button,
+  .storm-tabs > button {
+    display: none;
+    width: 100%;
+    justify-content: flex-start;
+    border-radius: var(--radius-md);
+    white-space: normal;
+  }
+
+  .tabs > button.active,
+  .game-page-tabs > button.active,
+  .storm-tabs > button.active {
+    display: inline-flex;
+    grid-column: 2;
+    grid-row: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-bottom-color: var(--border-color);
+  }
+
+  .tabs:focus-within > button,
+  .tabs:hover > button,
+  .game-page-tabs:focus-within > button,
+  .game-page-tabs:hover > button,
+  .storm-tabs:focus-within > button,
+  .storm-tabs:hover > button {
+    display: inline-flex;
+    grid-column: 1 / -1;
+  }
+
+  .tabs:focus-within > button.active,
+  .tabs:hover > button.active,
+  .game-page-tabs:focus-within > button.active,
+  .game-page-tabs:hover > button.active,
+  .storm-tabs:focus-within > button.active,
+  .storm-tabs:hover > button.active {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+}
+
+/* [UI-005] Compact centered authorization screen */
+body:has(#loginBtn),
+body:has(form[action*="login"]),
+body:has(input[type="password"]):has(input[type="email"]) {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+body:has(#loginBtn) .app,
+body:has(form[action*="login"]) .app,
+body:has(input[type="password"]):has(input[type="email"]) .app {
+  width: min(100%, 460px);
+  max-width: 460px;
+  margin: 0 auto;
+}
+
+body:has(#loginBtn) .card,
+body:has(form[action*="login"]) .card,
+body:has(input[type="password"]):has(input[type="email"]) .card {
+  width: 100%;
+  padding: 26px;
+  border-radius: 18px;
+  box-shadow: 0 22px 70px rgba(15, 23, 42, 0.14);
+}
+
+body:has(#loginBtn) h1,
+body:has(form[action*="login"]) h1,
+body:has(input[type="password"]):has(input[type="email"]) h1 {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+body:has(#loginBtn) p,
+body:has(form[action*="login"]) p,
+body:has(input[type="password"]):has(input[type="email"]) p {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+body:has(#loginBtn) input,
+body:has(form[action*="login"]) input,
+body:has(input[type="password"]):has(input[type="email"]) input {
+  width: 100%;
+  margin: 6px 0;
+}
+
+body:has(#loginBtn) button,
+body:has(form[action*="login"]) button,
+body:has(input[type="password"]):has(input[type="email"]) button {
+  width: 100%;
+  margin-top: 10px;
+}
+
+@media (max-width: 1100px) {
+  .task-editor-header-row {
+    grid-template-columns: 1fr;
+  }
+
+  .task-management-panel {
+    grid-template-columns: auto minmax(220px, 1fr) auto;
+  }
+
+  .task-settings-header {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .task-actions-row,
+  .draft-status {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 760px) {
+  .task-management-panel,
+  .task-settings-header {
+    grid-template-columns: 1fr;
+  }
+
+  .task-order-controls,
+  .task-copy-controls,
+  .task-name-row,
+  .task-type-row,
+  .task-actions-row,
+  .task-score-row {
+    flex-wrap: wrap;
+  }
+
+  .task-copy-controls select,
+  .task-name-input,
+  .task-type-row select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .game-layout .task-content {
+    padding: 14px;
+    border-radius: var(--radius-md);
+  }
+}
+
+/* =========================================================
+   UI PATCH 2026-06-23 B — fixes after visual QA
+   ========================================================= */
+
+/* [UI-002 fix] Team/timer row uses the same centered grid as the answer field. */
+.fixed-answer-wrapper .player-team-row {
+  width: min(100%, 920px);
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0;
+}
+
+/* Storm tabs: locked message starts from a new line; active tab is subtly highlighted. */
+.storm-tab small {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  color: #98a2b3;
+  font-size: 0.82em;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: normal;
+}
+
+.storm-tab.active,
+.game-page-tab.active,
+.tab-btn.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.06);
+}
+
+.storm-tab.active small {
+  color: #64748b;
+}
+
+/* The main content card is for STANDARD content only. Empty / hidden content must not leave a blank card. */
+.game-layout .task-content.hidden,
+#taskContent.hidden {
+  display: none !important;
+}
+
+/* Real mobile/click menu for task tabs. No hover opening. */
+.mobile-tabs-toggle {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .storm-tabs {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .storm-tabs::before {
+    content: none !important;
+  }
+
+  .storm-tabs .mobile-tabs-toggle {
+    display: inline-flex;
+    grid-column: 1;
+    grid-row: 1;
+    width: 42px;
+    min-width: 42px;
+    min-height: 36px;
+    padding: 0;
+    border-radius: var(--radius-md);
+    font-weight: 800;
+  }
+
+  .storm-tabs > .storm-tab {
+    display: none;
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: flex-start;
+    border-radius: var(--radius-md);
+    white-space: normal;
+  }
+
+  .storm-tabs > .storm-tab.active {
+    display: inline-flex;
+    grid-column: 2;
+    grid-row: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .storm-tabs.is-open > .storm-tab {
+    display: inline-flex;
+    grid-column: 1 / -1;
+  }
+
+  .storm-tabs.is-open > .storm-tab.active {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    white-space: normal;
+  }
+
+  /* Disable the previous CSS-only hover/focus fallback for Storm tabs. */
+  .storm-tabs:hover > button,
+  .storm-tabs:focus-within > button {
+    display: none;
+  }
+
+  .storm-tabs:hover > .mobile-tabs-toggle,
+  .storm-tabs:focus-within > .mobile-tabs-toggle,
+  .storm-tabs:hover > .storm-tab.active,
+  .storm-tabs:focus-within > .storm-tab.active {
+    display: inline-flex;
+  }
+
+  .storm-tabs.is-open:hover > .storm-tab,
+  .storm-tabs.is-open:focus-within > .storm-tab {
+    display: inline-flex;
+  }
+}
+
+/* =========================================================
+   UI PATCH 2026-06-23 C — Storm tab title/note layout fix
+   ========================================================= */
+
+/* Task tab title must stay on the first row; unlock/service text starts on row 2. */
+.storm-tab {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  text-align: left;
+}
+
+.storm-tab-main {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.storm-tab-note,
+.storm-tab small {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  color: #98a2b3;
+  font-size: 0.82em;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: normal;
+}
+
+.storm-tab.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.storm-tab.active .storm-tab-note,
+.storm-tab.active small {
+  color: #64748b;
+}
+
+@media (max-width: 640px) {
+  .storm-tabs > .storm-tab.active .storm-tab-main {
+    white-space: nowrap;
+  }
+
+  .storm-tabs.is-open > .storm-tab .storm-tab-main {
+    white-space: normal;
+  }
+}
+
+
+/* =========================================================
+   UI PATCH 2026-06-23 D — reliable click/tap Storm mobile menu
+   Fixes: no hover opening, show every tab when menu is open.
+   ========================================================= */
+@media (max-width: 640px) {
+  .storm-tabs {
+    display: grid !important;
+    grid-template-columns: 42px minmax(0, 1fr) !important;
+    align-items: stretch !important;
+    overflow: visible !important;
+  }
+
+  .storm-tabs::before {
+    content: none !important;
+    display: none !important;
+  }
+
+  .storm-tabs > .mobile-tabs-toggle {
+    display: inline-flex !important;
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    width: 42px !important;
+    min-width: 42px !important;
+    min-height: 36px !important;
+    border-radius: var(--radius-md) !important;
+  }
+
+  /* Closed state: only burger + active tab. Hover/focus must not reveal the list. */
+  .storm-tabs:not(.is-open) > .storm-tab {
+    display: none !important;
+  }
+
+  .storm-tabs:not(.is-open) > .storm-tab.active {
+    display: inline-flex !important;
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* Open state: show all task tabs, including locked/disabled ones. */
+  .storm-tabs.is-open > .storm-tab {
+    display: inline-flex !important;
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+    width: 100% !important;
+    white-space: normal !important;
+  }
+
+  .storm-tabs.is-open > .storm-tab .storm-tab-main {
+    white-space: normal !important;
+  }
+
+  .storm-tabs.is-open > .storm-tab.active {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+  }
+}
+
+/* =========================================================
+   UI PATCH 2026-06-23 E — Storm mobile tabs popover
+   - burger opens only by click/tap
+   - dropdown is over content, not pushing layout
+   - menu contains every task tab
+   ========================================================= */
+.storm-tabs-mobile-head {
+  display: none;
+}
+
+.storm-tabs-menu {
+  display: contents;
+}
+
+@media (max-width: 640px) {
+  .storm-tabs {
+    position: relative !important;
+    display: block !important;
+    overflow: visible !important;
+    padding-bottom: 0 !important;
+    border-bottom: 0 !important;
+  }
+
+  .storm-tabs::before {
+    content: none !important;
+    display: none !important;
+  }
+
+  .storm-tabs-mobile-head {
+    display: grid !important;
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 8px;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .storm-tabs > .mobile-tabs-toggle,
+  .storm-tabs > .storm-tab {
+    display: none !important;
+  }
+
+  .storm-tabs .mobile-tabs-toggle {
+    display: inline-flex !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+    border-radius: 8px !important;
+    border: 1px solid var(--border-color) !important;
+    background: #ffffff !important;
+    color: var(--heading-color) !important;
+    box-shadow: none !important;
+    font-size: 18px !important;
+    line-height: 1 !important;
+  }
+
+  .storm-tabs .mobile-tabs-toggle:hover,
+  .storm-tabs .mobile-tabs-toggle:focus-visible {
+    background: var(--surface-soft) !important;
+    border-color: var(--border-strong) !important;
+  }
+
+  .storm-tabs .storm-tab-mobile-active {
+    display: inline-flex !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 36px;
+    min-height: 36px;
+    padding: 7px 10px !important;
+    border-radius: 8px !important;
+    background: #eff6ff !important;
+    border-color: #bfdbfe !important;
+    color: #1d4ed8 !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+  }
+
+  .storm-tabs .storm-tab-mobile-active .storm-tab-main {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .storm-tabs-menu {
+    display: none !important;
+    position: absolute !important;
+    left: 0;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 3000;
+    max-height: min(70vh, 520px);
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 18px 46px rgba(15, 23, 42, 0.18);
+  }
+
+  .storm-tabs.is-open .storm-tabs-menu {
+    display: flex !important;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .storm-tabs-menu .storm-tab,
+  .storm-tabs.is-open .storm-tabs-menu .storm-tab,
+  .storm-tabs:hover .storm-tabs-menu .storm-tab,
+  .storm-tabs:focus-within .storm-tabs-menu .storm-tab {
+    display: inline-flex !important;
+    position: static !important;
+    width: 100% !important;
+    min-height: 36px;
+    justify-content: center;
+    align-items: flex-start;
+    border-radius: 8px !important;
+    white-space: normal !important;
+  }
+
+  .storm-tabs-menu .storm-tab .storm-tab-main {
+    white-space: normal !important;
+  }
+
+  .storm-tabs:not(.is-open) .storm-tabs-menu,
+  .storm-tabs:not(.is-open):hover .storm-tabs-menu,
+  .storm-tabs:not(.is-open):focus-within .storm-tabs-menu {
+    display: none !important;
+  }
+}
+
+
+/* =========================================================
+   UI PATCH 2026-06-23 F — mobile Storm tabs stability
+   - keep dropdown open during timer rerenders
+   - remove redundant outer frame around mobile tabs header
+   - no hover/focus opening; only .is-open opens the menu
+   ========================================================= */
+@media (max-width: 640px) {
+  .storm-tabs {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 0 14px !important;
+    border-radius: 0 !important;
+  }
+
+  .storm-tabs-mobile-head {
+    display: grid !important;
+    grid-template-columns: 36px minmax(0, 1fr) !important;
+    gap: 8px !important;
+    align-items: center !important;
+    width: 100% !important;
+  }
+
+  .storm-tabs .mobile-tabs-toggle {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    border-radius: 8px !important;
+    border: 1px solid var(--border-color) !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .storm-tabs:not(.is-open) .storm-tabs-menu,
+  .storm-tabs:hover:not(.is-open) .storm-tabs-menu,
+  .storm-tabs:focus-within:not(.is-open) .storm-tabs-menu {
+    display: none !important;
+  }
+
+  .storm-tabs.is-open .storm-tabs-menu {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+  }
+
+  .storm-tabs:hover:not(.is-open) .storm-tabs-menu .storm-tab,
+  .storm-tabs:focus-within:not(.is-open) .storm-tabs-menu .storm-tab {
+    display: none !important;
+  }
+
+  .storm-tabs.is-open .storm-tabs-menu .storm-tab {
+    display: inline-flex !important;
+  }
+}
+
+/* =========================================================
+   UI PATCH — compact runs, task toolbar, WYSIWYG, media popups
+   ========================================================= */
+
+.compact-form-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(260px, 1fr);
+  gap: 14px;
+  align-items: center;
+  margin: 14px 0;
+}
+
+.compact-form-row > span,
+.compact-form-row label > span {
+  font-weight: 700;
+  color: var(--heading-color, #0f172a);
+}
+
+.compact-form-row input,
+.compact-form-row select {
+  width: 100%;
+  margin: 0;
+}
+
+.compact-form-row-pair {
+  grid-template-columns: minmax(180px, 240px) minmax(170px, 220px) minmax(120px, 180px);
+}
+
+.compact-form-row-pair > label {
+  display: contents;
+}
+
+.compact-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding-left: min(240px, 28vw);
+}
+
+.create-run-form {
+  max-width: 980px;
+}
+
+.task-editor-shell {
+  padding: 10px;
+}
+
+.task-compact-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color, #d8e0ea);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface-soft, #f8fafc);
+}
+
+.task-compact-toolbar label,
+.task-compact-position,
+.task-compact-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  min-width: 0;
+}
+
+.task-compact-toolbar span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted-color, #64748b);
+  white-space: nowrap;
+}
+
+.task-compact-name {
+  flex: 1 1 250px;
+}
+
+.task-compact-name input {
+  min-width: 180px;
+  width: 100%;
+  max-width: 380px;
+  margin: 0;
+}
+
+.task-compact-type select {
+  width: 160px;
+  margin: 0;
+}
+
+.task-compact-position button {
+  min-width: 32px;
+  width: 32px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.task-compact-position strong {
+  min-width: 34px;
+  text-align: center;
+  color: var(--heading-color, #0f172a);
+}
+
+.task-compact-copy select {
+  width: min(280px, 30vw);
+  margin: 0;
+}
+
+.task-compact-delete {
+  margin-left: auto;
+}
+
+.embedded-task-editor {
+  padding: 0;
+  background: transparent;
+}
+
+.embedded-task-editor .app,
+.embedded-task-editor .card {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.embedded-task-editor .task-settings-header,
+.embedded-task-editor #taskDraftRestoreBanner {
+  display: none !important;
+}
+
+.compact-tiptap-toolbar {
+  gap: 4px;
+  padding: 6px;
+}
+
+.compact-tiptap-toolbar button,
+.compact-color-control {
+  width: 34px;
+  min-width: 34px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.compact-tiptap-toolbar button[title="Заголовок H2"],
+.compact-tiptap-toolbar button[title="Нумерований список"],
+.compact-tiptap-toolbar button[title="Додати рядок таблиці"],
+.compact-tiptap-toolbar button[title="Додати колонку таблиці"],
+.compact-tiptap-toolbar button[title="Видалити таблицю"] {
+  width: 42px;
+  min-width: 42px;
+}
+
+.compact-color-control {
+  position: relative;
+  overflow: hidden;
+}
+
+.compact-color-control input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.tiptap-editor,
+.tiptap-editor .ProseMirror,
+.tiptap-editor-surface,
+.tiptap-rendered-content {
+  color: var(--text-primary, #111827);
+}
+
+.media-editor-summary {
+  display: block;
+  width: 100%;
+  min-height: 110px;
+  padding: 10px;
+  border: 1px dashed var(--border-strong, #b8c3d2);
+  border-radius: var(--radius-md, 10px);
+  background: #fff;
+  text-align: center;
+  cursor: pointer;
+}
+
+.media-editor-summary img,
+.media-editor-summary video {
+  max-width: 240px;
+  max-height: 160px;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+}
+
+.media-editor-summary audio {
+  width: min(420px, 100%);
+}
+
+.media-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88px;
+  color: var(--muted-color, #64748b);
+}
+
+.media-editor-hint {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+
+.media-modal-card label {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  font-weight: 700;
+}
+
+.media-modal-card input,
+.media-modal-card select {
+  width: 100%;
+}
+
+.media-modal-dimensions {
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+.inline-save-message {
+  min-width: 120px;
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .compact-form-row,
+  .compact-form-row-pair {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 7px;
+    margin: 16px 0;
+  }
+
+  .compact-form-actions {
+    padding-left: 0;
+  }
+
+  .task-compact-toolbar {
+    align-items: stretch;
+  }
+
+  .task-compact-toolbar label,
+  .task-compact-position,
+  .task-compact-copy {
+    width: 100%;
+  }
+
+  .task-compact-copy {
+    flex-wrap: wrap;
+  }
+
+  .task-compact-type select,
+  .task-compact-copy select,
+  .task-compact-name input {
+    width: 100%;
+    max-width: none;
+  }
+
+  .task-compact-delete {
+    margin-left: 0;
+  }
+
+  .media-modal-dimensions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================================
+   UI PATCH 016 — final cleanup for runs, task header, WYSIWYG and media blocks
+   ========================================================= */
+:root {
+  --text-primary: #000000;
+}
+
+#createRunBlock.create-run-form {
+  width: 100%;
+  max-width: none;
+}
+
+#createRunBlock .compact-form-row {
+  grid-template-columns: 220px minmax(260px, 1fr);
+  gap: 12px 18px;
+  margin: 16px 0;
+}
+
+#createRunBlock .compact-form-row input,
+#createRunBlock .compact-form-row select {
+  width: 100%;
+  max-width: none;
+}
+
+.compact-run-bottom-row {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.compact-run-bottom-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.compact-run-bottom-row label span {
+  font-weight: 700;
+  color: var(--heading-color, #0f172a);
+}
+
+.compact-run-bottom-row input[type="date"] {
+  width: 180px;
+}
+
+.compact-run-bottom-row input[type="time"] {
+  width: 150px;
+}
+
+.compact-run-bottom-row #createRunBtn {
+  align-self: end;
+  margin: 0;
+}
+
+.compact-run-bottom-row #createRunMessage {
+  align-self: center;
+}
+
+.task-compact-toolbar-split {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(360px, auto);
+  align-items: stretch;
+  gap: 14px 28px;
+}
+
+.task-compact-main,
+.task-compact-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.task-compact-side {
+  align-items: flex-end;
+}
+
+.task-compact-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.task-compact-toolbar-split .task-compact-name {
+  width: 100%;
+  flex: none;
+}
+
+.task-compact-toolbar-split .task-compact-name input {
+  max-width: none;
+}
+
+.task-compact-toolbar-split .task-compact-copy {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.task-compact-toolbar-split .task-compact-copy select {
+  width: min(360px, 38vw);
+}
+
+.task-compact-toolbar-split .task-compact-delete {
+  margin-left: 0;
+  margin-top: auto;
+}
+
+.compact-tiptap-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tiptap-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tiptap-toolbar-group + .tiptap-toolbar-group {
+  padding-left: 10px;
+  border-left: 1px solid var(--border-color, #d8e0ea);
+}
+
+.tiptap-format-select {
+  width: 132px;
+  min-height: 32px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.compact-color-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tiptap-color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong, #b8c3d2);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.35);
+}
+
+.tiptap-toolbar-table-group {
+  display: none;
+}
+
+.tiptap-toolbar-table-group.is-visible {
+  display: inline-flex;
+}
+
+.tiptap-editor,
+.tiptap-editor .ProseMirror,
+.tiptap-editor-surface,
+.tiptap-rendered-content {
+  color: #000000;
+}
+
+.media-editor-summary {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 110px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong, #b8c3d2);
+  border-radius: var(--radius-md, 10px);
+  background: #fff;
+  text-align: center;
+  cursor: pointer;
+}
+
+.media-editor-summary:focus-visible {
+  outline: none;
+  border-color: var(--accent-color, #2563eb);
+  box-shadow: var(--focus-ring, 0 0 0 3px rgba(37, 99, 235, 0.16));
+}
+
+.media-editor-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.media-editor-summary img,
+.media-editor-summary video {
+  max-width: min(100%, 360px);
+  max-height: 220px;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+}
+
+.media-editor-summary audio {
+  width: min(480px, 100%);
+}
+
+@media (max-width: 900px) {
+  .task-compact-toolbar-split {
+    grid-template-columns: 1fr;
+  }
+
+  .task-compact-side,
+  .task-compact-toolbar-split .task-compact-copy {
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+
+  .task-compact-toolbar-split .task-compact-copy select {
+    width: min(100%, 360px);
+  }
+}
+
+@media (max-width: 760px) {
+  #createRunBlock .compact-form-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .compact-run-bottom-row {
+    align-items: stretch;
+  }
+
+  .compact-run-bottom-row label,
+  .compact-run-bottom-row input[type="date"],
+  .compact-run-bottom-row input[type="time"],
+  .compact-run-bottom-row #createRunBtn {
+    width: 100%;
+  }
+
+  .tiptap-toolbar-group + .tiptap-toolbar-group {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+/* =========================================================
+   UI PATCH 017 — WYSIWYG typography controls
+   - font family selector
+   - font size selector
+   - centered current-color swatch
+   ========================================================= */
+.compact-tiptap-toolbar {
+  align-items: center;
+  gap: 10px;
+}
+
+.tiptap-toolbar-text-group {
+  gap: 6px;
+}
+
+.tiptap-font-family-select,
+.tiptap-font-size-select {
+  min-height: 34px;
+  height: 34px;
+  margin: 0;
+  padding: 5px 28px 5px 9px;
+  border-radius: var(--radius-sm, 7px);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  background-color: #ffffff;
+}
+
+.tiptap-font-family-select {
+  width: 150px;
+}
+
+.tiptap-font-size-select {
+  width: 84px;
+}
+
+.compact-tiptap-toolbar button,
+.compact-color-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+
+.compact-color-control {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  margin: 0;
+  border-radius: var(--radius-sm, 7px);
+  line-height: 1;
+}
+
+.tiptap-color-swatch {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong, #b8c3d2);
+  background: #000000;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.35);
+}
+
+.compact-color-control input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.tiptap-editor,
+.tiptap-editor .ProseMirror,
+.tiptap-editor-surface,
+.tiptap-rendered-content {
+  color: #000000;
+}
+
+@media (max-width: 760px) {
+  .tiptap-font-family-select {
+    width: 132px;
+  }
+
+  .tiptap-font-size-select {
+    width: 78px;
+  }
+}
+
+/* =========================================================
+   WYSIWYG color picker alignment fix — 2026-06-23
+   Keeps the visible color swatch centered while the native
+   color input remains clickable across the whole control.
+   ========================================================= */
+.compact-tiptap-toolbar .compact-color-control,
+.tiptap-toolbar .compact-color-control,
+.tiptap-color-label.compact-color-control {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  align-self: center !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  max-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  max-height: 34px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  line-height: 1 !important;
+  vertical-align: middle !important;
+  overflow: hidden !important;
+}
+
+.compact-tiptap-toolbar .compact-color-control .tiptap-color-swatch,
+.tiptap-toolbar .compact-color-control .tiptap-color-swatch,
+.tiptap-color-label.compact-color-control .tiptap-color-swatch {
+  position: static !important;
+  display: block !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  min-height: 18px !important;
+  flex: 0 0 18px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-radius: 4px !important;
+  pointer-events: none !important;
+  transform: none !important;
+}
+
+.compact-tiptap-toolbar .compact-color-control input[type="color"],
+.tiptap-toolbar .compact-color-control input[type="color"],
+.tiptap-color-label.compact-color-control input[type="color"] {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  cursor: pointer !important;
 }

@@ -25,15 +25,42 @@
         <h2>Запуски ігор</h2>
         <p>Планування запусків, перегляд активних запусків і архіву.</p>
         <div class="admin-dashboard-actions">
-          <a href="/schedule-run.html">
-            <button class="large-action-btn" type="button">Запланувати запуск</button>
-          </a>
+          <button id="showCreateRunBtn" class="large-action-btn" type="button">Запланувати запуск</button>
           <a href="/all-active-runs.html">
             <button class="large-action-btn" type="button">Усі актуальні запуски</button>
           </a>
           <a href="/all-runs-archive.html">
             <button class="large-action-btn" type="button">Архів усіх запусків</button>
           </a>
+        </div>
+      </div>
+
+      <div id="createRunBlock" class="info-block create-run-form hidden">
+        <h2>Запланувати запуск</h2>
+
+        <label class="compact-form-row">
+          <span>Оберіть гру:</span>
+          <select id="runGameSelect">
+            <option value="">Завантаження...</option>
+          </select>
+        </label>
+
+        <label class="compact-form-row">
+          <span>Вкажіть назву запуску:</span>
+          <input id="runTitle" type="text" placeholder="Наприклад: Ajax Systems Summer Quest" />
+        </label>
+
+        <div class="compact-run-bottom-row">
+          <label>
+            <span>Дата старту:</span>
+            <input id="runDate" type="date" />
+          </label>
+          <label>
+            <span>Час старту:</span>
+            <input id="runTime" type="time" />
+          </label>
+          <button id="createRunBtn" type="button">Створити запуск</button>
+          <span id="createRunMessage"></span>
         </div>
       </div>
 
@@ -86,8 +113,17 @@
     </section>
   </main>
 
+  <script src="time-utils.js"></script>
   <script>
     let currentUser = null;
+
+    function escapeHtml(text) {
+      return String(text || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
 
     async function checkAuth() {
       const response = await fetch("/api/auth/me");
@@ -110,9 +146,77 @@
       return result.user;
     }
 
+
+    async function loadReadyGamesForRun() {
+      const select = document.getElementById("runGameSelect");
+      if (!select) return;
+
+      const response = await fetch("/api/games/ready");
+      const result = await response.json();
+
+      if (!response.ok) {
+        select.innerHTML = `<option value="">${escapeHtml(result.error || "Помилка завантаження")}</option>`;
+        return;
+      }
+
+      const games = result.games || [];
+      if (!games.length) {
+        select.innerHTML = '<option value="">Немає ігор зі статусом READY</option>';
+        return;
+      }
+
+      select.innerHTML = `
+        <option value="">Оберіть гру</option>
+        ${games.map(game => `
+          <option value="${game.id}">${escapeHtml(game.title || `Гра #${game.id}`)}</option>
+        `).join("")}
+      `;
+    }
+
     document.getElementById("showCreateGameBtn").addEventListener("click", () => {
       document.getElementById("createGameBlock").classList.toggle("hidden");
       document.getElementById("gameTitle").focus();
+    });
+
+    document.getElementById("showCreateRunBtn").addEventListener("click", async () => {
+      const block = document.getElementById("createRunBlock");
+      block.classList.toggle("hidden");
+      if (!block.classList.contains("hidden")) {
+        await loadReadyGamesForRun();
+        document.getElementById("runGameSelect").focus();
+      }
+    });
+
+    document.getElementById("createRunBtn").addEventListener("click", async () => {
+      const gameId = document.getElementById("runGameSelect").value;
+      const title = document.getElementById("runTitle").value.trim();
+      const date = document.getElementById("runDate").value;
+      const time = document.getElementById("runTime").value;
+      const message = document.getElementById("createRunMessage");
+
+      message.className = "";
+      message.textContent = "";
+
+      if (!gameId) { alert("Оберіть гру"); return; }
+      if (!title) { alert("Вкажіть назву запуску"); return; }
+      if (!date) { alert("Вкажіть дату старту"); return; }
+      if (!time) { alert("Вкажіть час старту"); return; }
+
+      const started_at = QETime.toUtcSqlFromLocalDateTime(date, time);
+      const response = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ game_id: gameId, title, started_at })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        message.className = "";
+        message.textContent = result.error || "Помилка створення запуску";
+        return;
+      }
+
+      window.location.href = `/run.html?id=${result.runId}`;
     });
 
     document.getElementById("createGameBtn").addEventListener("click", async () => {

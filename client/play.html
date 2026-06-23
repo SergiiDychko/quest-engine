@@ -407,9 +407,24 @@ function clearTaskView() {
   if (hintsBlock) hintsBlock.classList.add("hidden");
 }
 
+function shouldHideMainTaskContent() {
+  const type = String(currentTask?.task_type || "").toUpperCase();
+  return type === "OLYMPIAD" || type === "MULTITASK";
+}
+
 function showTaskContainers() {
   document.getElementById("taskTitle")?.classList.remove("hidden");
-  document.getElementById("taskContent")?.classList.remove("hidden");
+
+  const taskContent = document.getElementById("taskContent");
+  if (!taskContent) return;
+
+  if (shouldHideMainTaskContent()) {
+    taskContent.innerHTML = "";
+    taskContent.classList.add("hidden");
+    return;
+  }
+
+  taskContent.classList.remove("hidden");
 }
 
 function calculateStormTaskAutoRemaining(task) {
@@ -458,36 +473,105 @@ function renderStormTabs() {
   const tabs = document.getElementById("stormTabs");
   const tasks = currentStorm?.tasks || [];
 
+  if (!tabs) return;
+
+  const keepStormTabsOpen = tabs.classList.contains("is-open");
+  tabs.classList.remove("is-open");
+
+  const getTabButtonHtml = task => {
+    const title = getStormTaskTabTitle(task);
+    const active = !selectedStormBriefing && Number(task.id) === Number(selectedStormTaskId);
+    const completed = Boolean(task.completed_at);
+    const autoCompleted = Boolean(task.auto_transition);
+    const locked = !task.available;
+    const classes = ["storm-tab", active ? "active" : "", completed ? (autoCompleted ? "auto-completed" : "completed") : "", locked ? "locked" : ""].filter(Boolean).join(" ");
+    const hint = locked ? (task.locked_message || "Завдання ще заблоковане") : "";
+    const statusIcon = completed ? "✓ " : locked ? "🔒 " : "";
+
+    return `
+      <button type="button" class="${classes}" data-storm-task-id="${task.id}" ${locked ? "disabled" : ""} title="${escapeHtml(hint)}">
+        <span class="storm-tab-main">${statusIcon}${escapeHtml(title)}</span>
+        ${locked && hint ? `<span class="storm-tab-note">${escapeHtml(hint)}</span>` : ""}
+      </button>
+    `;
+  };
+
+  const taskButtonsHtml = tasks.map(getTabButtonHtml).join("");
+  const activeTask = !selectedStormBriefing ? getStormTaskItem(selectedStormTaskId) : null;
+  const activeTitle = selectedStormBriefing
+    ? "Брифінг"
+    : (activeTask ? getStormTaskTabTitle(activeTask) : "Оберіть завдання");
+  const activeCompleted = activeTask ? Boolean(activeTask.completed_at) : false;
+  const activeLocked = activeTask ? !activeTask.available : false;
+  const activeIcon = activeCompleted ? "✓ " : activeLocked ? "🔒 " : "";
+
   tabs.innerHTML = `
-    <button type="button" class="storm-tab storm-tab-briefing ${selectedStormBriefing ? "active" : ""}" data-storm-briefing-tab>Брифінг</button>
-    ${tasks.map(task => {
-      const title = getStormTaskTabTitle(task);
-      const active = !selectedStormBriefing && Number(task.id) === Number(selectedStormTaskId);
-      const completed = Boolean(task.completed_at);
-      const autoCompleted = Boolean(task.auto_transition);
-      const locked = !task.available;
-      const classes = ["storm-tab", active ? "active" : "", completed ? (autoCompleted ? "auto-completed" : "completed") : "", locked ? "locked" : ""].filter(Boolean).join(" ");
-      const hint = locked ? (task.locked_message || "Завдання ще заблоковане") : "";
-      return `
-        <button type="button" class="${classes}" data-storm-task-id="${task.id}" ${locked ? "disabled" : ""} title="${escapeHtml(hint)}">
-          ${completed ? "✓ " : locked ? "🔒 " : ""}${escapeHtml(title)}
-          ${locked && hint ? `<small>${escapeHtml(hint)}</small>` : ""}
-        </button>
-      `;
-    }).join("")}
+    <div class="storm-tabs-mobile-head">
+      <button type="button" class="mobile-tabs-toggle" aria-expanded="false" aria-label="Відкрити список завдань">☰</button>
+      <button type="button" class="storm-tab storm-tab-mobile-active ${selectedStormBriefing ? "active" : ""}" aria-label="Поточна вкладка">
+        <span class="storm-tab-main">${activeIcon}${escapeHtml(activeTitle)}</span>
+      </button>
+    </div>
+    <div class="storm-tabs-menu">
+      <button type="button" class="storm-tab storm-tab-briefing ${selectedStormBriefing ? "active" : ""}" data-storm-briefing-tab>
+        <span class="storm-tab-main">Брифінг</span>
+      </button>
+      ${taskButtonsHtml}
+    </div>
   `;
 
-  tabs.querySelector('[data-storm-briefing-tab]')?.addEventListener('click', () => {
+  if (keepStormTabsOpen && window.matchMedia("(max-width: 640px)").matches) {
+    tabs.classList.add("is-open");
+  }
+
+  const mobileToggle = tabs.querySelector(".mobile-tabs-toggle");
+  const closeStormTabsMenu = () => {
+    tabs.classList.remove("is-open");
+    mobileToggle?.setAttribute("aria-expanded", "false");
+  };
+
+  if (tabs.classList.contains("is-open")) {
+    mobileToggle?.setAttribute("aria-expanded", "true");
+  }
+
+  if (window.__questEngineStormTabsOutsideHandler) {
+    document.removeEventListener("pointerdown", window.__questEngineStormTabsOutsideHandler, true);
+  }
+
+  window.__questEngineStormTabsOutsideHandler = event => {
+    const target = event.target;
+    if (target instanceof Node && tabs.contains(target)) return;
+    closeStormTabsMenu();
+  };
+
+  document.addEventListener("pointerdown", window.__questEngineStormTabsOutsideHandler, true);
+
+  mobileToggle?.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const isOpen = tabs.classList.toggle("is-open");
+    mobileToggle.setAttribute("aria-expanded", String(isOpen));
+  });
+
+  tabs.querySelector(".storm-tab-mobile-active")?.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const isOpen = tabs.classList.toggle("is-open");
+    mobileToggle?.setAttribute("aria-expanded", String(isOpen));
+  });
+
+  tabs.querySelector("[data-storm-briefing-tab]")?.addEventListener("click", () => {
+    closeStormTabsMenu();
     setStormBriefingMode(true);
     renderStormTabs();
   });
 
-  tabs.querySelectorAll('[data-storm-task-id]').forEach(button => {
-    button.addEventListener('click', () => {
+  tabs.querySelectorAll("[data-storm-task-id]").forEach(button => {
+    button.addEventListener("click", () => {
+      closeStormTabsMenu();
       const id = Number(button.dataset.stormTaskId);
       const task = (currentStorm.tasks || []).find(item => Number(item.id) === id && item.available);
       if (!task || !task.task) return;
-      clearTaskView();
       selectedStormBriefing = false;
       selectedStormTaskId = id;
       currentTask = task.task;
@@ -495,19 +579,21 @@ function renderStormTabs() {
       currentFoundAnswers = task.found_answers || [];
       currentOlympiad = task.olympiad || null;
       currentMultitask = task.multitask || null;
+      setStormBriefingMode(false);
+      clearTaskView();
       showTaskContainers();
       const taskName = String(currentTask.title || "").trim();
       document.getElementById("taskTitle").textContent = taskName ? `Завдання ${currentTask.sort_order}. ${taskName}` : `Завдання ${currentTask.sort_order}.`;
-      renderStormTabs();
       renderContent(task.content || []);
       renderOlympiad();
       renderMultitask();
       renderFormat();
       renderHintsAndAutoTransition(task.hints || [], currentTask);
-      setStormBriefingMode(false);
+      renderStormTabs();
     });
   });
 }
+
 
 function secondsUntil(value) {
   if (!value) return 0;
@@ -624,12 +710,15 @@ function startStormTimers() {
 
 function renderContent(content) {
   const container = document.getElementById("taskContent");
+  if (!container) return;
 
-  if (!content.length) {
+  if (shouldHideMainTaskContent() || !content.length) {
     container.innerHTML = "";
+    container.classList.add("hidden");
     return;
   }
 
+  container.classList.remove("hidden");
   container.innerHTML = QEContentRenderer.renderBlocks(content);
   QEContentRenderer.resizeHtmlFrames(container);
 }
@@ -664,16 +753,20 @@ function parseOlympiadCellBlocks(value) {
   }
 }
 
-function renderOlympiadCellContent(cell) {
-  const contentValue = String(cell.content || "").trim();
-  if (!contentValue) {
-    return `<span class="olympiad-cell-number">${cell.cell_number}</span>`;
-  }
+function olympiadCellHasContent(cell) {
+  const contentValue = String(cell?.content || "").trim();
+  if (!contentValue) return false;
 
   const blocks = parseOlympiadCellBlocks(contentValue);
-  if (!blocks.length) {
-    return `<span class="olympiad-cell-number">${cell.cell_number}</span>`;
-  }
+  return Array.isArray(blocks) && blocks.length > 0;
+}
+
+function renderOlympiadCellContent(cell) {
+  const contentValue = String(cell?.content || "").trim();
+  if (!contentValue) return "";
+
+  const blocks = parseOlympiadCellBlocks(contentValue);
+  if (!blocks.length) return "";
 
   return QEContentRenderer.renderBlocks(blocks);
 }
@@ -745,19 +838,21 @@ function renderOlympiad() {
         content = `<div class="olympiad-found-answer">${escapeHtml(cell.answer_text || "")}</div>`;
       } else if (isBottom) {
         const previewContent = renderOlympiadCellContent(cell);
-        content = `
-          <div class="olympiad-scaled-preview" data-olympiad-preview="${cell.cell_number}" title="Натисніть для збільшення">
-            <div class="olympiad-scaled-preview-inner">
-              ${previewContent}
+        const previewBlock = previewContent
+          ? `
+            <div class="olympiad-scaled-preview" data-olympiad-preview="${cell.cell_number}" title="Натисніть для збільшення">
+              <div class="olympiad-scaled-preview-inner">
+                ${previewContent}
+              </div>
             </div>
-          </div>
+          `
+          : "";
+        content = `
+          ${previewBlock}
           ${purchaseButton}
         `;
       } else {
-        content = `
-          <span class="olympiad-cell-number">${cell.cell_number}</span>
-          ${purchaseButton}
-        `;
+        content = purchaseButton;
       }
 
       html += `
@@ -862,10 +957,13 @@ function openOlympiadPreviewModal(cellNumber) {
   if (!modal || !content || !title) return;
 
   title.textContent = `Клітинка №${cellNumber}`;
-  content.innerHTML = cell.is_found
+  const cellContent = cell.is_found
     ? `<div class="olympiad-found-answer full">${escapeHtml(cell.answer_text || "")}</div>`
     : renderOlympiadCellContent(cell);
 
+  if (!cellContent.trim()) return;
+
+  content.innerHTML = cellContent;
   modal.classList.remove("hidden");
   QEContentRenderer.resizeHtmlFrames(content);
 }

@@ -26,8 +26,7 @@
             <span class="help-icon">?</span>
             <span class="help-tooltip-text">READY означає, що гра готова до проведення і може бути обрана для нового запуску.</span>
           </span>
-          <button id="saveStatusBtn" type="button">Зберегти статус</button>
-          <span id="saveStatusMessage"></span>
+          <span id="saveStatusMessage" class="inline-save-message"></span>
         </div>
 
         <p id="gameMeta"></p>
@@ -146,6 +145,20 @@ async function loadPages() {
   currentPages = result.pages || {};
 }
 
+function activeTaskFrameHasUnsavedDraft() {
+  const frame = document.getElementById("taskEditorFrame");
+  try {
+    return Boolean(frame?.contentWindow?.hasUnsavedTaskDraft?.());
+  } catch (error) {
+    return false;
+  }
+}
+
+function confirmLeaveTaskEditorWithUnsavedDraft() {
+  if (!activeTaskFrameHasUnsavedDraft()) return true;
+  return confirm("У поточному завданні є незбережена локальна чернетка. Перейти без збереження?");
+}
+
 function buildTabs() {
   const container = document.getElementById("gamePageTabs");
 
@@ -189,6 +202,9 @@ function buildTabs() {
 
   document.querySelectorAll(".game-page-tab").forEach(button => {
     button.addEventListener("click", () => {
+      if (button.dataset.tab !== activeTab && !confirmLeaveTaskEditorWithUnsavedDraft()) {
+        return;
+      }
       activeTab = button.dataset.tab;
       render();
     });
@@ -494,43 +510,63 @@ async function saveGameStatus(options = {}) {
 function renderTaskTab(task) {
   const content = document.getElementById("tabContent");
   const taskIndex = currentTasks.findIndex(item => Number(item.id) === Number(task.id));
-  const canMoveUp = taskIndex > 0;
-  const canMoveDown = taskIndex >= 0 && taskIndex < currentTasks.length - 1;
+  const canMoveLeft = taskIndex > 0;
+  const canMoveRight = taskIndex >= 0 && taskIndex < currentTasks.length - 1;
+  const currentNumber = Number(task.sort_order) || taskIndex + 1;
   const gameOptions = availableGames.map(game => `
     <option value="${Number(game.id)}" ${Number(game.id) === Number(gameId) ? "selected" : ""}>
       ${escapeHtml(game.title || `Гра #${game.id}`)}${Number(game.id) === Number(gameId) ? " — ця гра" : ""}
     </option>
   `).join("");
 
+  const typeOptions = [
+    ["STANDARD", "STANDARD"],
+    ["OLYMPIAD", "OLYMPIAD"],
+    ["MULTITASK", "MULTITASK"]
+  ].map(([value, label]) => `
+    <option value="${value}" ${String(task.task_type || "STANDARD").toUpperCase() === value ? "selected" : ""}>${label}</option>
+  `).join("");
+
   content.innerHTML = `
-    <div class="info-block page-editor-block">
-      <div class="task-editor-header-row">
-        <div>
-          <h2>${escapeHtml(task.title || `Завдання ${task.sort_order}`)}</h2>
-          <p class="muted-text">Поточний порядок: ${Number(task.sort_order) || taskIndex + 1}</p>
+    <div class="info-block page-editor-block task-editor-shell">
+      <div class="task-compact-toolbar task-compact-toolbar-split">
+        <div class="task-compact-main">
+          <label class="task-compact-name">
+            <span>Завдання:</span>
+            <input id="parentTaskTitleInput" type="text" value="${escapeHtml(task.title || "")}" placeholder="Завдання без назви">
+          </label>
+
+          <div class="task-compact-meta-row">
+            <label class="task-compact-type">
+              <span>Тип:</span>
+              <select id="parentTaskTypeSelect">${typeOptions}</select>
+            </label>
+
+            <div class="task-compact-position" aria-label="Позиція завдання">
+              <span>Позиція:</span>
+              <button id="moveTaskLeftBtn" type="button" title="Перемістити ліворуч" ${canMoveLeft ? "" : "disabled"}>‹</button>
+              <strong>№${currentNumber}</strong>
+              <button id="moveTaskRightBtn" type="button" title="Перемістити праворуч" ${canMoveRight ? "" : "disabled"}>›</button>
+            </div>
+          </div>
         </div>
 
-        <div class="task-management-panel">
-          <div class="task-order-controls">
-            <button id="moveTaskUpBtn" type="button" ${canMoveUp ? "" : "disabled"}>↑ Вище</button>
-            <button id="moveTaskDownBtn" type="button" ${canMoveDown ? "" : "disabled"}>↓ Нижче</button>
-          </div>
-
-          <div class="task-copy-controls">
-            <label for="copyTaskTargetSelect">Скопіювати в гру</label>
-            <select id="copyTaskTargetSelect">
-              ${gameOptions}
-            </select>
-            <button id="copyTaskBtn" type="button">Скопіювати завдання</button>
+        <div class="task-compact-side">
+          <div class="task-compact-copy">
+            <span>Скопіювати в гру:</span>
+            <select id="copyTaskTargetSelect">${gameOptions}</select>
+            <button id="copyTaskBtn" type="button">OK</button>
             <span id="copyTaskMessage"></span>
           </div>
+
+          <button id="parentDeleteTaskBtn" type="button" class="danger-btn task-compact-delete">Видалити</button>
         </div>
       </div>
 
       <iframe
         id="taskEditorFrame"
-        class="task-editor-frame"
-        src="/task.html?id=${task.id}&game=${gameId}"
+        class="task-editor-frame compact-parent-frame"
+        src="/task.html?id=${task.id}&game=${gameId}&embedded=1"
         title="Редактор завдання"
       ></iframe>
 
@@ -542,16 +578,28 @@ function renderTaskTab(task) {
     </div>
   `;
 
-  document.getElementById("moveTaskUpBtn")?.addEventListener("click", () => {
+  document.getElementById("parentTaskTitleInput")?.addEventListener("blur", () => {
+    updateTaskHeaderFromParent(task.id);
+  });
+
+  document.getElementById("parentTaskTypeSelect")?.addEventListener("change", () => {
+    updateTaskHeaderFromParent(task.id, { reloadIframe: true });
+  });
+
+  document.getElementById("moveTaskLeftBtn")?.addEventListener("click", () => {
     moveTask(task.id, -1);
   });
 
-  document.getElementById("moveTaskDownBtn")?.addEventListener("click", () => {
+  document.getElementById("moveTaskRightBtn")?.addEventListener("click", () => {
     moveTask(task.id, 1);
   });
 
   document.getElementById("copyTaskBtn")?.addEventListener("click", () => {
     copyTask(task.id);
+  });
+
+  document.getElementById("parentDeleteTaskBtn")?.addEventListener("click", () => {
+    deleteTaskFromParent(task.id);
   });
 
   document.getElementById("previewTaskPageBtn")?.addEventListener("click", () => {
@@ -571,7 +619,69 @@ function renderTaskTab(task) {
   });
 }
 
+async function updateTaskHeaderFromParent(taskId, options = {}) {
+  const titleInput = document.getElementById("parentTaskTitleInput");
+  const typeSelect = document.getElementById("parentTaskTypeSelect");
+  const task = currentTasks.find(item => Number(item.id) === Number(taskId));
+
+  const title = titleInput?.value || "";
+  const task_type = typeSelect?.value || task?.task_type || "STANDARD";
+
+  const response = await fetch(`/api/tasks/${taskId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title,
+      task_type,
+      hide_answers_block: ["OLYMPIAD", "MULTITASK"].includes(task_type),
+      score_points: Number(task?.score_points) || 0
+    })
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    alert(result.error || "Помилка збереження завдання");
+    return;
+  }
+
+  if (task) {
+    task.title = title.trim();
+    task.task_type = task_type;
+  }
+
+  const frame = document.getElementById("taskEditorFrame");
+  try {
+    const childDoc = frame?.contentDocument;
+    const childTitle = childDoc?.getElementById("taskNameInput");
+    const childType = childDoc?.getElementById("taskTypeSelect");
+    if (childTitle) childTitle.value = title;
+    if (childType) childType.value = task_type;
+  } catch (error) {}
+
+  if (options.reloadIframe && frame) {
+    frame.contentWindow?.location?.reload();
+  }
+}
+
+async function deleteTaskFromParent(taskId) {
+  if (!confirm("Видалити це завдання?")) return;
+  if (!confirmLeaveTaskEditorWithUnsavedDraft()) return;
+
+  const response = await fetch(`/api/tasks/${taskId}`, { method: "DELETE" });
+  const result = await response.json();
+
+  if (!response.ok) {
+    alert(result.error || "Помилка видалення завдання");
+    return;
+  }
+
+  await loadTasks();
+  activeTab = currentTasks[0] ? `TASK_${currentTasks[0].id}` : "START";
+  render();
+}
+
 async function moveTask(taskId, direction) {
+  if (!confirmLeaveTaskEditorWithUnsavedDraft()) return;
   const index = currentTasks.findIndex(item => Number(item.id) === Number(taskId));
   const targetIndex = index + direction;
 
@@ -606,6 +716,7 @@ async function moveTask(taskId, direction) {
 }
 
 async function copyTask(taskId) {
+  if (!confirmLeaveTaskEditorWithUnsavedDraft()) return;
   const targetSelect = document.getElementById("copyTaskTargetSelect");
   const message = document.getElementById("copyTaskMessage");
   const targetGameId = Number(targetSelect?.value);
@@ -686,7 +797,7 @@ async function saveTaskPageChanges() {
   }
 }
 
-document.getElementById("saveStatusBtn").addEventListener("click", () => {
+document.getElementById("gameStatusSelect").addEventListener("change", () => {
   saveGameStatus();
 });
 
@@ -729,6 +840,12 @@ document.getElementById("addTaskBtn").addEventListener("click", async () => {
   }
 
   render();
+});
+
+window.addEventListener("beforeunload", event => {
+  if (!activeTaskFrameHasUnsavedDraft()) return;
+  event.preventDefault();
+  event.returnValue = "";
 });
 
 async function init() {

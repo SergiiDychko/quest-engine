@@ -25,15 +25,8 @@
       class="task-name-input"
     >
 
-    <button
-      id="saveTaskNameBtn"
-      class="icon-btn"
-      title="Зберегти назву"
-    >
-      ✏️
-    </button>
-
     <span id="saveTaskNameMessage"></span>
+    <span id="taskDraftStatus" class="draft-status" aria-live="polite"></span>
 
   </div>
 
@@ -77,6 +70,8 @@
   </div>
 
 </div>
+
+    <div id="taskDraftRestoreBanner" class="draft-restore-banner hidden"></div>
 
     <div class="tabs">
       <button class="tab-btn active" data-tab="contentTab">Контент</button>
@@ -197,6 +192,10 @@
 const params = new URLSearchParams(window.location.search);
 const taskId = params.get("id");
 const gameId = params.get("game");
+const isEmbeddedEditor = params.get("embedded") === "1";
+if (isEmbeddedEditor) {
+  document.body.classList.add("embedded-task-editor");
+}
 
 let currentGame = null;
 let currentTask = null;
@@ -349,7 +348,7 @@ async function saveTaskHeader(options = {}) {
   return { ok: true };
 }
 
-document.getElementById("saveTaskNameBtn").addEventListener("click", async () => {
+document.getElementById("taskNameInput").addEventListener("blur", async () => {
   await saveTaskHeader();
 });
 
@@ -435,6 +434,7 @@ async function loadContent() {
   contentBuilder = new QEContentBuilder({
     root: contentRoot,
     blocks,
+    onChange: markTaskDraftDirty,
     previewTitle: currentTask
       ? (String(currentTask.title || "").trim() ? `Завдання ${currentTask.sort_order}. ${currentTask.title}` : `Завдання ${currentTask.sort_order}.`)
       : "Попередній перегляд завдання"
@@ -940,6 +940,7 @@ async function openOlympiadCellContentModal(cellNumber) {
   olympiadCellContentEditor = new QEContentBuilder({
     root,
     blocks: parseOlympiadCellBlocks(content),
+    onChange: markTaskDraftDirty,
     previewTitle: `Клітинка №${cellNumber}`
   });
 }
@@ -973,6 +974,7 @@ function applyOlympiadCellContent() {
     }
   }
 
+  markTaskDraftDirty();
   closeOlympiadCellContentModal();
 }
 
@@ -1019,6 +1021,7 @@ async function regenerateOlympiadStructure() {
   };
 
   renderOlympiadEditor();
+  markTaskDraftDirty();
 }
 
 function collectOlympiadPayload() {
@@ -1183,6 +1186,7 @@ function renderMultitaskEditor() {
   document.getElementById("addMultitaskSubtaskBtn")?.addEventListener("click", () => {
     currentMultitask.subtasks.push(makeMultitaskSubtask());
     renderMultitaskEditor();
+    markTaskDraftDirty();
   });
 
   document.getElementById("closeMultitaskContentModalBtn")?.addEventListener("click", closeMultitaskContentModal);
@@ -1206,8 +1210,8 @@ function renderMultitaskEditor() {
   });
 
   root.querySelectorAll("input, textarea, select").forEach(input => {
-    input.addEventListener("input", collectMultitaskEditorState);
-    input.addEventListener("change", collectMultitaskEditorState);
+    input.addEventListener("input", () => { collectMultitaskEditorState(); markTaskDraftDirty(); });
+    input.addEventListener("change", () => { collectMultitaskEditorState(); markTaskDraftDirty(); });
   });
 
   updateMultitaskRequiredFieldState();
@@ -1340,6 +1344,7 @@ function openMultitaskContentModal(subtaskId) {
   multitaskContentEditor = new QEContentBuilder({
     root,
     blocks: parseMultitaskContent(subtask.content),
+    onChange: markTaskDraftDirty,
     previewTitle: `Підзавдання №${subtask.sort_order}`
   });
 }
@@ -1373,6 +1378,7 @@ function applyMultitaskContent() {
   }
 
   collectMultitaskEditorState();
+  markTaskDraftDirty();
   closeMultitaskContentModal();
 }
 
@@ -1382,6 +1388,7 @@ function deleteMultitaskSubtask(subtaskId) {
   currentMultitask.subtasks = currentMultitask.subtasks.filter(item => String(item.id) !== String(subtaskId));
   currentMultitask.subtasks.forEach((item, index) => { item.sort_order = index + 1; });
   renderMultitaskEditor();
+  markTaskDraftDirty();
 }
 
 function moveMultitaskSubtask(subtaskId, direction) {
@@ -1393,6 +1400,7 @@ function moveMultitaskSubtask(subtaskId, direction) {
   currentMultitask.subtasks.splice(target, 0, item);
   currentMultitask.subtasks.forEach((subtask, i) => { subtask.sort_order = i + 1; });
   renderMultitaskEditor();
+  markTaskDraftDirty();
 }
 
 function collectMultitaskCodesForDuplicateValidation() {
@@ -1971,6 +1979,7 @@ window.saveTaskChangesFromParent = async function () {
   await loadTask();
   await loadContent();
   await loadHints();
+  clearTaskDraftAfterServerSave();
 
   return { ok: true };
 };
@@ -2071,10 +2080,299 @@ async function saveStormUnlockSettings() {
 document.getElementById("stormUnlockType")?.addEventListener("change", updateStormUnlockFields);
 document.getElementById("saveStormUnlockBtn")?.addEventListener("click", saveStormUnlockSettings);
 
+
+const TASK_DRAFT_AUTOSAVE_DELAY = 900;
+let taskDraftTimer = null;
+let taskDraftReady = false;
+let taskDraftDirty = false;
+let taskDraftRestoreApplied = false;
+let lastTaskSavedSignature = "";
+
+function getTaskDraftKey() {
+  return `qe-task-draft:${taskId}`;
+}
+
+function formatDraftTime(value) {
+  if (!value) return "";
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function setTaskDraftStatus(text, state = "") {
+  const status = document.getElementById("taskDraftStatus");
+  if (!status) return;
+  status.textContent = text || "";
+  status.dataset.state = state;
+}
+
+function safeGetBuilderBlocks(builder) {
+  if (!builder) return [];
+  try {
+    return builder.getBlocks();
+  } catch (error) {
+    return null;
+  }
+}
+
+function collectCurrentTaskDraftPayload() {
+  if (!currentTask) return null;
+
+  const payload = {
+    task_id: Number(taskId),
+    saved_at: new Date().toISOString(),
+    header: {
+      title: document.getElementById("taskNameInput")?.value || "",
+      task_type: document.getElementById("taskTypeSelect")?.value || "STANDARD",
+      score_points: document.getElementById("taskScorePointsInput")?.value || 0,
+      storm: collectStormUnlockPayload()
+    },
+    content: safeGetBuilderBlocks(contentBuilder),
+    answers: [],
+    hints: [],
+    olympiad: null,
+    multitask: null,
+    auto_transition: {
+      enabled: Boolean(document.getElementById("autoTransitionEnabled")?.checked),
+      minutes: document.getElementById("autoTransitionMinutes")?.value || 30,
+      penalty: document.getElementById("autoTransitionPenalty")?.value || 0
+    }
+  };
+
+  if (currentTask.task_type === "OLYMPIAD") {
+    try { payload.olympiad = collectOlympiadPayload(); } catch (error) { payload.olympiad = currentOlympiad; }
+  }
+
+  if (currentTask.task_type === "MULTITASK") {
+    collectMultitaskEditorState();
+    payload.multitask = currentMultitask;
+  }
+
+  if (currentTask.task_type !== "OLYMPIAD" && currentTask.task_type !== "MULTITASK") {
+    payload.answers = currentAnswers.map(answer => {
+      const timeInput = document.querySelector(`[data-id="${answer.id}"][data-field="time_modifier_seconds"]`);
+      return {
+        id: answer.id,
+        sort_order: answer.sort_order,
+        answer_type: answer.answer_type,
+        answer_text: document.querySelector(`[data-id="${answer.id}"][data-field="answer_text"]`)?.value || "",
+        description: document.querySelector(`[data-id="${answer.id}"][data-field="description"]`)?.value || "",
+        comment: document.querySelector(`[data-id="${answer.id}"][data-field="comment"]`)?.value || "",
+        time_modifier_seconds: timeInput ? timeInput.value : 0
+      };
+    });
+  }
+
+  payload.required_main_answers = document.getElementById("requiredMainAnswers")?.value || currentTask.required_main_answers || 1;
+
+  payload.hints = currentHints.map(hint => ({
+    id: hint.id,
+    hint_type: document.getElementById(`hint-type-${hint.id}`)?.value || hint.hint_type || "TIMED",
+    content: document.getElementById(`hint-content-${hint.id}`)?.value || "",
+    show_after_seconds: document.getElementById(`hint-seconds-${hint.id}`)?.value || 0,
+    purchase_after_seconds: document.getElementById(`hint-purchase-after-${hint.id}`)?.value || 0,
+    purchase_value: document.getElementById(`hint-purchase-value-${hint.id}`)?.value || 0
+  }));
+
+  return payload;
+}
+
+function makeTaskDraftSignature(payload) {
+  const copy = JSON.parse(JSON.stringify(payload || {}));
+  delete copy.saved_at;
+  return JSON.stringify(copy);
+}
+
+function saveTaskDraftNow() {
+  if (!taskDraftReady || !currentTask) return;
+
+  const payload = collectCurrentTaskDraftPayload();
+  if (!payload) return;
+
+  const signature = makeTaskDraftSignature(payload);
+  if (signature === lastTaskSavedSignature && !taskDraftDirty) {
+    setTaskDraftStatus("Усі зміни збережені", "clean");
+    return;
+  }
+
+  localStorage.setItem(getTaskDraftKey(), JSON.stringify(payload));
+  taskDraftDirty = true;
+  setTaskDraftStatus(`Чернетку автозбережено о ${formatDraftTime(payload.saved_at)}`, "dirty");
+}
+
+function scheduleTaskDraftAutosave() {
+  if (!taskDraftReady) return;
+  clearTimeout(taskDraftTimer);
+  setTaskDraftStatus("Є незбережені зміни…", "dirty");
+  taskDraftTimer = setTimeout(saveTaskDraftNow, TASK_DRAFT_AUTOSAVE_DELAY);
+}
+
+function markTaskDraftDirty() {
+  if (!taskDraftReady || taskDraftRestoreApplied) return;
+  taskDraftDirty = true;
+  scheduleTaskDraftAutosave();
+}
+
+function clearTaskDraftAfterServerSave() {
+  clearTimeout(taskDraftTimer);
+  localStorage.removeItem(getTaskDraftKey());
+  const payload = collectCurrentTaskDraftPayload();
+  lastTaskSavedSignature = makeTaskDraftSignature(payload);
+  taskDraftDirty = false;
+  setTaskDraftStatus(`Збережено на сервері о ${formatDraftTime(new Date().toISOString())}`, "clean");
+}
+
+function hasUnsavedTaskDraft() {
+  if (taskDraftDirty) return true;
+  const saved = localStorage.getItem(getTaskDraftKey());
+  return Boolean(saved);
+}
+
+window.hasUnsavedTaskDraft = hasUnsavedTaskDraft;
+
+function applyTaskDraftPayload(payload) {
+  if (!payload) return;
+  taskDraftRestoreApplied = true;
+
+  if (payload.header) {
+    const title = document.getElementById("taskNameInput");
+    const type = document.getElementById("taskTypeSelect");
+    const score = document.getElementById("taskScorePointsInput");
+    if (title) title.value = payload.header.title || "";
+    if (type) type.value = payload.header.task_type || "STANDARD";
+    if (score) score.value = Number(payload.header.score_points) || 0;
+  }
+
+  if (Array.isArray(payload.content) && contentBuilder) {
+    contentBuilder.setBlocks(payload.content);
+  }
+
+  if (Array.isArray(payload.answers)) {
+    payload.answers.forEach(answer => {
+      const set = (field, value) => {
+        const input = document.querySelector(`[data-id="${answer.id}"][data-field="${field}"]`);
+        if (input) input.value = value ?? "";
+      };
+      set("answer_text", answer.answer_text);
+      set("description", answer.description);
+      set("comment", answer.comment);
+      set("time_modifier_seconds", answer.time_modifier_seconds);
+    });
+  }
+
+  const required = document.getElementById("requiredMainAnswers");
+  if (required && payload.required_main_answers) required.value = payload.required_main_answers;
+
+  if (Array.isArray(payload.hints)) {
+    payload.hints.forEach(hint => {
+      const set = (id, value) => {
+        const input = document.getElementById(`${id}-${hint.id}`);
+        if (input) input.value = value ?? "";
+      };
+      set("hint-type", hint.hint_type);
+      set("hint-content", hint.content);
+      set("hint-seconds", hint.show_after_seconds);
+      set("hint-purchase-after", hint.purchase_after_seconds);
+      set("hint-purchase-value", hint.purchase_value);
+    });
+    document.querySelectorAll('[data-standard-hint]').forEach(card => updateStandardHintFields(card));
+  }
+
+  if (payload.auto_transition) {
+    const enabled = document.getElementById("autoTransitionEnabled");
+    const minutes = document.getElementById("autoTransitionMinutes");
+    const penalty = document.getElementById("autoTransitionPenalty");
+    if (enabled) enabled.checked = Boolean(payload.auto_transition.enabled);
+    if (minutes) minutes.value = payload.auto_transition.minutes || 30;
+    if (penalty) penalty.value = payload.auto_transition.penalty || 0;
+  }
+
+  if (payload.olympiad && currentTask?.task_type === "OLYMPIAD") {
+    currentOlympiad = {
+      settings: {
+        association_count: payload.olympiad.association_count,
+        level_count: payload.olympiad.level_count,
+        completion_type: payload.olympiad.completion_type,
+        required_cells_count: payload.olympiad.required_cells_count,
+        purchase_available_after_seconds: payload.olympiad.purchase_available_after_seconds
+      },
+      cells: payload.olympiad.cells || []
+    };
+    if (currentTask) currentTask.hide_answers_block = Boolean(payload.olympiad.hide_answers_block);
+    renderOlympiadEditor();
+  }
+
+  if (payload.multitask && currentTask?.task_type === "MULTITASK") {
+    currentMultitask = payload.multitask;
+    renderMultitaskEditor();
+  }
+
+  updateTaskEditorMode();
+  taskDraftRestoreApplied = false;
+  taskDraftDirty = true;
+  scheduleTaskDraftAutosave();
+}
+
+function showTaskDraftRestoreBanner(payload) {
+  const banner = document.getElementById("taskDraftRestoreBanner");
+  if (!banner || !payload) return;
+
+  banner.classList.remove("hidden");
+  banner.innerHTML = `
+    <strong>Знайдено локальну чернетку</strong>
+    <span>автозбережено о ${escapeHtml(formatDraftTime(payload.saved_at))}.</span>
+    <button type="button" id="restoreTaskDraftBtn">Відновити</button>
+    <button type="button" id="discardTaskDraftBtn" class="small-light-btn">Відкинути</button>
+  `;
+
+  document.getElementById("restoreTaskDraftBtn")?.addEventListener("click", () => {
+    applyTaskDraftPayload(payload);
+    banner.classList.add("hidden");
+  });
+
+  document.getElementById("discardTaskDraftBtn")?.addEventListener("click", () => {
+    localStorage.removeItem(getTaskDraftKey());
+    banner.classList.add("hidden");
+    taskDraftDirty = false;
+    setTaskDraftStatus("Локальну чернетку відкинуто", "clean");
+  });
+}
+
+function initializeTaskDrafts() {
+  const serverPayload = collectCurrentTaskDraftPayload();
+  lastTaskSavedSignature = makeTaskDraftSignature(serverPayload);
+  taskDraftReady = true;
+  taskDraftDirty = false;
+  setTaskDraftStatus("Автозбереження чернетки увімкнено", "clean");
+
+  try {
+    const saved = localStorage.getItem(getTaskDraftKey());
+    if (saved) {
+      const payload = JSON.parse(saved);
+      if (makeTaskDraftSignature(payload) !== lastTaskSavedSignature) {
+        showTaskDraftRestoreBanner(payload);
+        setTaskDraftStatus("Є локальна чернетка", "dirty");
+      } else {
+        localStorage.removeItem(getTaskDraftKey());
+      }
+    }
+  } catch (error) {
+    localStorage.removeItem(getTaskDraftKey());
+  }
+
+  document.body.addEventListener("input", markTaskDraftDirty, true);
+  document.body.addEventListener("change", markTaskDraftDirty, true);
+}
+
+window.addEventListener("beforeunload", event => {
+  if (!hasUnsavedTaskDraft()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
 async function initTaskEditor() {
   await loadTask();
   await loadContent();
   await loadHints();
+  initializeTaskDrafts();
 }
 
 initTaskEditor();

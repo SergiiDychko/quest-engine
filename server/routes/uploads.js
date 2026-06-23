@@ -32,6 +32,20 @@ function safeImageExtension(filename, mimeType) {
   return "";
 }
 
+function safeVideoExtension(filename, mimeType) {
+  const ext = String(path.extname(filename || "")).toLowerCase();
+  const allowed = new Set([".mp4", ".webm", ".mov", ".m4v", ".ogv"]);
+
+  if (allowed.has(ext)) return ext;
+
+  if (mimeType === "video/mp4") return ".mp4";
+  if (mimeType === "video/webm") return ".webm";
+  if (mimeType === "video/quicktime") return ".mov";
+  if (mimeType === "video/ogg") return ".ogv";
+
+  return "";
+}
+
 function safeAudioExtension(filename, mimeType) {
   const ext = String(path.extname(filename || "")).toLowerCase();
   const allowed = new Set([".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac", ".webm"]);
@@ -96,6 +110,19 @@ router.post("/image", requireAuth, (req, res) => {
     maxSizeBytes: 10 * 1024 * 1024,
     getExtension: safeImageExtension,
     errorPrefix: "Підтримуються лише зображення"
+  }, res);
+});
+
+router.post("/video", requireAuth, (req, res) => {
+  const { filename, dataUrl } = req.body || {};
+
+  return saveDataUrlFile({
+    dataUrl,
+    filename,
+    typePrefix: "video",
+    maxSizeBytes: 200 * 1024 * 1024,
+    getExtension: safeVideoExtension,
+    errorPrefix: "Підтримуються лише відеофайли"
   }, res);
 });
 

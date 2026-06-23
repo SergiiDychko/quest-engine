@@ -14,15 +14,15 @@
       <h1>Запланувати запуск</h1>
 
       <div class="info-block create-run-form">
-        <label>
-          Гра
+        <label class="compact-form-row">
+          <span>Оберіть гру:</span>
           <select id="gameSelect">
             <option value="">Завантаження...</option>
           </select>
         </label>
 
-        <label>
-          Назва запуску
+        <label class="compact-form-row">
+          <span>Вкажіть назву запуску:</span>
           <input
             id="newRunTitle"
             type="text"
@@ -30,18 +30,22 @@
           >
         </label>
 
-        <label>
-          Дата старту
-          <input id="newRunDate" type="date">
-        </label>
+        <div class="compact-form-row compact-form-row-pair">
+          <label>
+            <span>Дата старту:</span>
+            <input id="newRunDate" type="date">
+          </label>
 
-        <label>
-          Час старту
-          <input id="newRunTime" type="time">
-        </label>
+          <label>
+            <span>Час старту:</span>
+            <input id="newRunTime" type="time">
+          </label>
+        </div>
 
-        <button id="createRunBtn" type="button">Створити запуск</button>
-        <span id="createRunMessage"></span>
+        <div class="compact-form-actions">
+          <button id="createRunBtn" type="button">Створити запуск</button>
+          <span id="createRunMessage"></span>
+        </div>
       </div>
     </section>
   </main>

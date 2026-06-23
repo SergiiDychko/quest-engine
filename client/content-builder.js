@@ -50,6 +50,7 @@
 
     if (type === "VIDEO") {
       return {
+        source: "URL",
         url: "",
         widthValue: "720",
         widthUnit: "px",
@@ -185,6 +186,7 @@
       ]) => {
         const modules = {
           Editor: core.Editor,
+          Extension: core.Extension,
           StarterKit: starterKit.default,
           Underline: underline.default,
           TextAlign: textAlign.default,
@@ -314,7 +316,12 @@
 
       const list = this.getBlockList(containerPath);
       list.push(makeBlock(normalizedType));
+      const newIndex = list.length - 1;
+      const newPath = containerPath ? `${containerPath}:${newIndex}` : String(newIndex);
       this.render();
+      if (["IMAGE", "VIDEO", "AUDIO"].includes(normalizedType)) {
+        this.openMediaModal(newPath);
+      }
       this.onChange();
     }
 
@@ -410,28 +417,9 @@
           }
         }
 
-        if (block.type === "IMAGE") {
-          block.data.source = wrapper.querySelector(`[data-field="source"]`)?.value || "URL";
-          block.data.url = wrapper.querySelector(`[data-field="url"]`)?.value || "";
-          block.data.alt = wrapper.querySelector(`[data-field="alt"]`)?.value || "";
-          block.data.caption = wrapper.querySelector(`[data-field="caption"]`)?.value || "";
-          block.data.widthValue = normalizeDimensionValue(wrapper.querySelector(`[data-field="widthValue"]`)?.value) || "600";
-          block.data.widthUnit = normalizeUnit(wrapper.querySelector(`[data-field="widthUnit"]`)?.value);
-          block.data.heightValue = normalizeDimensionValue(wrapper.querySelector(`[data-field="heightValue"]`)?.value);
-          block.data.heightUnit = normalizeUnit(wrapper.querySelector(`[data-field="heightUnit"]`)?.value);
-        }
-
-        if (block.type === "VIDEO") {
-          block.data.url = wrapper.querySelector(`[data-field="url"]`)?.value || "";
-          block.data.widthValue = normalizeDimensionValue(wrapper.querySelector(`[data-field="widthValue"]`)?.value) || "720";
-          block.data.widthUnit = normalizeUnit(wrapper.querySelector(`[data-field="widthUnit"]`)?.value);
-          block.data.heightValue = normalizeDimensionValue(wrapper.querySelector(`[data-field="heightValue"]`)?.value);
-          block.data.heightUnit = normalizeUnit(wrapper.querySelector(`[data-field="heightUnit"]`)?.value);
-        }
-
-        if (block.type === "AUDIO") {
-          block.data.source = wrapper.querySelector(`[data-field="source"]`)?.value || "URL";
-          block.data.url = wrapper.querySelector(`[data-field="url"]`)?.value || "";
+        if (["IMAGE", "VIDEO", "AUDIO"].includes(block.type)) {
+          // Media blocks are edited only through the pop-up modal.
+          // Nothing should be synced from the visible preview.
         }
 
         if (block.type === "HTML") {
@@ -484,9 +472,20 @@
           if (action === "up") this.moveBlock(path, -1);
           if (action === "down") this.moveBlock(path, 1);
           if (action === "delete") this.deleteBlock(path);
+          if (action === "edit-media") this.openMediaModal(path);
           if (action === "upload-image") await this.uploadImage(path);
           if (action === "upload-audio") await this.uploadAudio(path);
           if (action === "update-section-columns") this.updateSectionColumns(path);
+        });
+      });
+
+      this.root.querySelectorAll("[data-media-preview-path]").forEach(preview => {
+        preview.addEventListener("dblclick", () => this.openMediaModal(preview.dataset.mediaPreviewPath));
+        preview.addEventListener("keydown", event => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            this.openMediaModal(preview.dataset.mediaPreviewPath);
+          }
         });
       });
 
@@ -529,27 +528,63 @@
 
       return `
         <div class="tiptap-block" data-text-editor-path="${path}">
-          <div class="tiptap-toolbar">
-            <button type="button" data-editor-action="paragraph" data-path="${path}">Текст</button>
-            <button type="button" data-editor-action="heading2" data-path="${path}">H2</button>
-            <button type="button" data-editor-action="bold" data-path="${path}"><strong>B</strong></button>
-            <button type="button" data-editor-action="italic" data-path="${path}"><em>I</em></button>
-            <button type="button" data-editor-action="underline" data-path="${path}"><u>U</u></button>
-            <button type="button" data-editor-action="bulletList" data-path="${path}">• список</button>
-            <button type="button" data-editor-action="orderedList" data-path="${path}">1. список</button>
-            <button type="button" data-editor-action="alignLeft" data-path="${path}">←</button>
-            <button type="button" data-editor-action="alignCenter" data-path="${path}">↔</button>
-            <button type="button" data-editor-action="alignRight" data-path="${path}">→</button>
-            <label class="tiptap-color-label">
-              Колір
-              <input type="color" value="#111827" data-editor-action="color" data-path="${path}">
-            </label>
-            <button type="button" data-editor-action="link" data-path="${path}">Посилання</button>
-            <button type="button" data-editor-action="image" data-path="${path}">Картинка URL</button>
-            <button type="button" data-editor-action="table" data-path="${path}">Таблиця</button>
-            <button type="button" data-editor-action="addRow" data-path="${path}">+ рядок</button>
-            <button type="button" data-editor-action="addColumn" data-path="${path}">+ колонка</button>
-            <button type="button" data-editor-action="deleteTable" data-path="${path}">× таблиця</button>
+          <div class="tiptap-toolbar compact-tiptap-toolbar">
+            <div class="tiptap-toolbar-group tiptap-toolbar-text-group">
+              <select class="tiptap-font-family-select" title="Шрифт" aria-label="Шрифт" data-editor-action="fontFamily" data-path="${path}">
+                <option value="">Шрифт</option>
+                <option value="Arial, sans-serif">Arial</option>
+                <option value="Verdana, sans-serif">Verdana</option>
+                <option value="Tahoma, sans-serif">Tahoma</option>
+                <option value="Georgia, serif">Georgia</option>
+                <option value="Times New Roman, serif">Times New Roman</option>
+                <option value="Courier New, monospace">Courier New</option>
+              </select>
+              <select class="tiptap-font-size-select" title="Розмір тексту" aria-label="Розмір тексту" data-editor-action="fontSize" data-path="${path}">
+                <option value="">Розмір</option>
+                <option value="10px">10</option>
+                <option value="12px">12</option>
+                <option value="14px">14</option>
+                <option value="16px">16</option>
+                <option value="18px">18</option>
+                <option value="20px">20</option>
+                <option value="24px">24</option>
+                <option value="28px">28</option>
+                <option value="32px">32</option>
+                <option value="48px">48</option>
+                <option value="72px">72</option>
+              </select>
+              <label class="tiptap-color-label compact-color-control" title="Колір тексту" aria-label="Колір тексту">
+                <span class="tiptap-color-swatch" style="background:#000000"></span>
+                <input type="color" value="#000000" data-editor-action="color" data-path="${path}">
+              </label>
+              <button type="button" title="Жирний" aria-label="Жирний" data-editor-action="bold" data-path="${path}"><strong>B</strong></button>
+              <button type="button" title="Курсив" aria-label="Курсив" data-editor-action="italic" data-path="${path}"><em>I</em></button>
+              <button type="button" title="Підкреслення" aria-label="Підкреслення" data-editor-action="underline" data-path="${path}"><u>U</u></button>
+              <button type="button" title="Закреслення" aria-label="Закреслення" data-editor-action="strike" data-path="${path}"><s>S</s></button>
+            </div>
+
+            <div class="tiptap-toolbar-group tiptap-toolbar-list-group">
+              <button type="button" title="Маркований список" aria-label="Маркований список" data-editor-action="bulletList" data-path="${path}">•</button>
+              <button type="button" title="Нумерований список" aria-label="Нумерований список" data-editor-action="orderedList" data-path="${path}">1.</button>
+            </div>
+
+            <div class="tiptap-toolbar-group tiptap-toolbar-align-group">
+              <button type="button" title="Вирівняти ліворуч" aria-label="Вирівняти ліворуч" data-editor-action="alignLeft" data-path="${path}">←</button>
+              <button type="button" title="Вирівняти по центру" aria-label="Вирівняти по центру" data-editor-action="alignCenter" data-path="${path}">↔</button>
+              <button type="button" title="Вирівняти праворуч" aria-label="Вирівняти праворуч" data-editor-action="alignRight" data-path="${path}">→</button>
+            </div>
+
+            <div class="tiptap-toolbar-group tiptap-toolbar-insert-group">
+              <button type="button" title="Додати посилання" aria-label="Додати посилання" data-editor-action="link" data-path="${path}">🔗</button>
+              <button type="button" title="Зображення за URL" aria-label="Зображення за URL" data-editor-action="image" data-path="${path}">🖼</button>
+              <button type="button" title="Вставити таблицю" aria-label="Вставити таблицю" data-editor-action="table" data-path="${path}">▦</button>
+            </div>
+
+            <div class="tiptap-toolbar-group tiptap-toolbar-table-group" data-table-controls="${path}">
+              <button type="button" title="Додати рядок таблиці" aria-label="Додати рядок таблиці" data-editor-action="addRow" data-path="${path}">+R</button>
+              <button type="button" title="Додати колонку таблиці" aria-label="Додати колонку таблиці" data-editor-action="addColumn" data-path="${path}">+C</button>
+              <button type="button" title="Видалити таблицю" aria-label="Видалити таблицю" data-editor-action="deleteTable" data-path="${path}">×▦</button>
+            </div>
           </div>
 
           <div class="tiptap-load-message" data-tiptap-message="${path}">
@@ -595,6 +630,214 @@
       `;
     }
 
+    renderMediaSummary(block, path) {
+      const data = block.data || defaultData(block.type);
+      const hasUrl = Boolean(String(data.url || "").trim());
+      let preview = `<div class="media-placeholder">Медіа ще не додано. Натисніть «Налаштувати».</div>`;
+
+      if (hasUrl && block.type === "IMAGE") {
+        preview = `<img src="${escapeHtml(data.url)}" alt="${escapeHtml(data.alt || "")}">`;
+      }
+
+      if (hasUrl && block.type === "VIDEO") {
+        preview = `<video controls src="${escapeHtml(data.url)}"></video>`;
+      }
+
+      if (hasUrl && block.type === "AUDIO") {
+        preview = `<audio controls src="${escapeHtml(data.url)}"></audio>`;
+      }
+
+      return `
+        <div class="media-editor-summary" data-media-preview-path="${path}" title="Подвійний клік — редагувати медіа" tabindex="0">
+          ${preview}
+        </div>
+        <div class="media-editor-actions">
+          <button type="button" data-action="edit-media" data-path="${path}">Редагувати</button>
+        </div>
+        <p class="muted-text media-editor-hint">Подвійний клік по медіаблоку відкриває форму редагування.</p>
+      `;
+    }
+
+    renderMediaModalForm(block, path) {
+      const data = block.data || defaultData(block.type);
+      const isImage = block.type === "IMAGE";
+      const isVideo = block.type === "VIDEO";
+      const isAudio = block.type === "AUDIO";
+      const title = isImage ? "Зображення" : isVideo ? "Відео" : "Аудіо";
+      const accept = isImage ? "image/*" : isVideo ? "video/*" : "audio/*";
+      const uploadAction = isImage ? "modal-upload-image" : isVideo ? "modal-upload-video" : "modal-upload-audio";
+
+      return `
+        <div class="modal-backdrop media-modal-backdrop" data-media-modal-path="${path}">
+          <div class="modal-card media-modal-card" role="dialog" aria-modal="true" aria-label="${title}">
+            <div class="modal-header">
+              <h3>${title}</h3>
+              <button type="button" class="icon-btn" data-media-modal-action="close" title="Закрити">×</button>
+            </div>
+
+            <label>URL ${title.toLowerCase()}
+              <input data-modal-field="url" type="text" value="${escapeHtml(data.url || "")}" placeholder="https://... або /uploads/...">
+            </label>
+
+            <div class="builder-upload-row">
+              <input data-modal-field="file" type="file" accept="${accept}">
+              <button type="button" data-media-modal-action="${uploadAction}">Завантажити файл</button>
+            </div>
+
+            ${!isAudio ? this.renderModalDimensionFields(data) : ""}
+
+            ${isImage ? `
+              <label>Alt-текст
+                <input data-modal-field="alt" type="text" value="${escapeHtml(data.alt || "")}" placeholder="Короткий опис зображення">
+              </label>
+              <label>Підпис під зображенням
+                <input data-modal-field="caption" type="text" value="${escapeHtml(data.caption || "")}" placeholder="Необовʼязково">
+              </label>
+            ` : ""}
+
+            <div class="modal-actions">
+              <button type="button" data-media-modal-action="close">Скасувати</button>
+              <button type="button" class="danger-btn" data-media-modal-action="delete">Видалити</button>
+              <button type="button" data-media-modal-action="save">${String(data.url || "").trim() ? "Зберегти" : "Додати"}</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    renderModalDimensionFields(data) {
+      return `
+        <div class="builder-dimensions media-modal-dimensions">
+          <label>Ширина
+            <span class="dimension-row">
+              <input data-modal-field="widthValue" type="number" min="1" step="1" value="${escapeHtml(data.widthValue || "")}" placeholder="Напр. 600">
+              <select data-modal-field="widthUnit">
+                <option value="px" ${data.widthUnit !== "%" ? "selected" : ""}>px</option>
+                <option value="%" ${data.widthUnit === "%" ? "selected" : ""}>%</option>
+              </select>
+            </span>
+          </label>
+          <label>Висота
+            <span class="dimension-row">
+              <input data-modal-field="heightValue" type="number" min="1" step="1" value="${escapeHtml(data.heightValue || "")}" placeholder="auto">
+              <select data-modal-field="heightUnit">
+                <option value="px" ${data.heightUnit !== "%" ? "selected" : ""}>px</option>
+                <option value="%" ${data.heightUnit === "%" ? "selected" : ""}>%</option>
+              </select>
+            </span>
+          </label>
+        </div>
+        <p class="muted-text">Для зображення або відео вкажіть хоча б ширину або висоту.</p>
+      `;
+    }
+
+    openMediaModal(path) {
+      this.syncFromDom();
+      const block = this.getBlockByPath(path);
+      if (!block || !["IMAGE", "VIDEO", "AUDIO"].includes(block.type)) return;
+
+      this.closeMediaModal();
+      document.body.insertAdjacentHTML("beforeend", this.renderMediaModalForm(block, path));
+      const modal = document.querySelector(`[data-media-modal-path="${path}"]`);
+      modal?.querySelector(`[data-modal-field="url"]`)?.focus();
+
+      modal?.addEventListener("click", async event => {
+        if (event.target === modal) {
+          this.closeMediaModal();
+          return;
+        }
+
+        const action = event.target?.dataset?.mediaModalAction;
+        if (!action) return;
+
+        if (action === "close") this.closeMediaModal();
+        if (action === "delete") {
+          this.closeMediaModal();
+          this.deleteBlock(path);
+        }
+        if (action === "save") this.saveMediaModal(path);
+        if (action === "modal-upload-image") await this.uploadMediaFromModal(path, "image");
+        if (action === "modal-upload-video") await this.uploadMediaFromModal(path, "video");
+        if (action === "modal-upload-audio") await this.uploadMediaFromModal(path, "audio");
+      });
+    }
+
+    closeMediaModal() {
+      document.querySelectorAll(".media-modal-backdrop").forEach(item => item.remove());
+    }
+
+    saveMediaModal(path) {
+      const modal = document.querySelector(`[data-media-modal-path="${path}"]`);
+      const block = this.getBlockByPath(path);
+      if (!modal || !block) return;
+
+      const url = modal.querySelector(`[data-modal-field="url"]`)?.value.trim() || "";
+      const widthValue = normalizeDimensionValue(modal.querySelector(`[data-modal-field="widthValue"]`)?.value);
+      const heightValue = normalizeDimensionValue(modal.querySelector(`[data-modal-field="heightValue"]`)?.value);
+
+      if (!url) {
+        alert("Вкажіть URL або завантажте файл.");
+        return;
+      }
+
+      if ((block.type === "IMAGE" || block.type === "VIDEO") && !widthValue && !heightValue) {
+        alert("Вкажіть хоча б ширину або висоту.");
+        return;
+      }
+
+      block.data.source = "URL";
+      block.data.url = url;
+
+      if (block.type === "IMAGE") {
+        block.data.alt = modal.querySelector(`[data-modal-field="alt"]`)?.value || "";
+        block.data.caption = modal.querySelector(`[data-modal-field="caption"]`)?.value || "";
+      }
+
+      if (block.type === "IMAGE" || block.type === "VIDEO") {
+        block.data.widthValue = widthValue || "";
+        block.data.widthUnit = normalizeUnit(modal.querySelector(`[data-modal-field="widthUnit"]`)?.value);
+        block.data.heightValue = heightValue || "";
+        block.data.heightUnit = normalizeUnit(modal.querySelector(`[data-modal-field="heightUnit"]`)?.value);
+      }
+
+      this.closeMediaModal();
+      this.render();
+      this.onChange();
+    }
+
+    async uploadMediaFromModal(path, kind) {
+      const modal = document.querySelector(`[data-media-modal-path="${path}"]`);
+      const input = modal?.querySelector(`[data-modal-field="file"]`);
+      const file = input?.files?.[0];
+
+      if (!file) {
+        alert("Оберіть файл");
+        return;
+      }
+
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const response = await fetch(`/api/uploads/${kind}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, dataUrl })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        alert(result.error || "Помилка завантаження файлу");
+        return;
+      }
+
+      const urlInput = modal.querySelector(`[data-modal-field="url"]`);
+      if (urlInput) urlInput.value = result.url;
+    }
+
     renderEditor(block, path) {
       const data = block.data || defaultData(block.type);
 
@@ -602,60 +845,8 @@
         return this.renderTextEditor(block, path);
       }
 
-      if (block.type === "IMAGE") {
-        return `
-          <label>Спосіб додавання</label>
-          <select data-field="source">
-            <option value="URL" ${data.source !== "UPLOAD" ? "selected" : ""}>URL</option>
-            <option value="UPLOAD" ${data.source === "UPLOAD" ? "selected" : ""}>Завантажити файл</option>
-          </select>
-
-          <label>URL зображення</label>
-          <input data-field="url" type="text" value="${escapeHtml(data.url || "")}" placeholder="https://... або /uploads/...">
-
-          <div class="builder-upload-row">
-            <input data-field="file" type="file" accept="image/*">
-            <button type="button" data-action="upload-image" data-path="${path}">Завантажити</button>
-          </div>
-
-          ${this.renderDimensionFields(data)}
-
-          <label>Alt-текст</label>
-          <input data-field="alt" type="text" value="${escapeHtml(data.alt || "")}" placeholder="Короткий опис зображення">
-
-          <label>Підпис під зображенням</label>
-          <input data-field="caption" type="text" value="${escapeHtml(data.caption || "")}" placeholder="Необовʼязково">
-
-          ${data.url ? `<div class="builder-preview"><img src="${escapeHtml(data.url)}" alt=""></div>` : ""}
-        `;
-      }
-
-      if (block.type === "VIDEO") {
-        return `
-          <label>URL відео</label>
-          <input data-field="url" type="text" value="${escapeHtml(data.url || "")}" placeholder="YouTube, Vimeo або пряме посилання на mp4/webm">
-          ${this.renderDimensionFields(data)}
-        `;
-      }
-
-      if (block.type === "AUDIO") {
-        return `
-          <label>Спосіб додавання</label>
-          <select data-field="source">
-            <option value="URL" ${data.source !== "UPLOAD" ? "selected" : ""}>URL</option>
-            <option value="UPLOAD" ${data.source === "UPLOAD" ? "selected" : ""}>Завантажити файл</option>
-          </select>
-
-          <label>URL аудіо</label>
-          <input data-field="url" type="text" value="${escapeHtml(data.url || "")}" placeholder="https://.../audio.mp3 або /uploads/audio.mp3">
-
-          <div class="builder-upload-row">
-            <input data-field="audioFile" type="file" accept="audio/*">
-            <button type="button" data-action="upload-audio" data-path="${path}">Завантажити аудіо</button>
-          </div>
-
-          ${data.url ? `<div class="builder-audio-preview"><audio controls src="${escapeHtml(data.url)}"></audio></div>` : ""}
-        `;
+      if (["IMAGE", "VIDEO", "AUDIO"].includes(block.type)) {
+        return this.renderMediaSummary(block, path);
       }
 
       if (block.type === "HTML") {
@@ -778,6 +969,29 @@
         }
       });
 
+      const TextAppearance = modules.Extension.create({
+        name: "textAppearance",
+        addGlobalAttributes() {
+          return [
+            {
+              types: ["textStyle"],
+              attributes: {
+                fontSize: {
+                  default: null,
+                  parseHTML: element => element.style.fontSize || null,
+                  renderHTML: attributes => attributes.fontSize ? { style: `font-size:${attributes.fontSize};` } : {}
+                },
+                fontFamily: {
+                  default: null,
+                  parseHTML: element => element.style.fontFamily || null,
+                  renderHTML: attributes => attributes.fontFamily ? { style: `font-family:${attributes.fontFamily};` } : {}
+                }
+              }
+            }
+          ];
+        }
+      });
+
       textWrappers.forEach(wrapper => {
         const path = wrapper.dataset.textEditorPath;
         const block = this.getBlockByPath(path);
@@ -796,6 +1010,7 @@
             modules.StarterKit,
             modules.Underline,
             modules.TextStyle,
+            TextAppearance,
             modules.Color,
             modules.TextAlign.configure({
               types: ["heading", "paragraph", "listItem"]
@@ -820,11 +1035,16 @@
             }
           },
           onUpdate: () => {
+            this.updateTextToolbarState(path, editor);
             this.onChange();
+          },
+          onSelectionUpdate: () => {
+            this.updateTextToolbarState(path, editor);
           }
         });
 
         this.textEditors.set(block.id, editor);
+        this.updateTextToolbarState(path, editor);
 
         if (message) {
           message.textContent = "WYSIWYG-редактор готовий.";
@@ -855,6 +1075,46 @@
       return parsed ? `${parsed}${unitFallback}` : "";
     }
 
+    updateTextToolbarState(path, editor) {
+      const wrapper = this.root?.querySelector(`[data-text-editor-path="${path}"]`);
+      if (!wrapper || !editor) return;
+
+      const tableControls = wrapper.querySelector(`[data-table-controls="${path}"]`);
+      if (tableControls) {
+        tableControls.classList.toggle("is-visible", editor.isActive("table"));
+      }
+
+      const textStyleAttrs = editor.getAttributes("textStyle") || {};
+
+      const fontFamilySelect = wrapper.querySelector(`select[data-editor-action="fontFamily"]`);
+      if (fontFamilySelect) {
+        const currentFont = String(textStyleAttrs.fontFamily || "").replace(/["']/g, "").trim();
+        const matchingFont = Array.from(fontFamilySelect.options).find(option => {
+          const optionFont = String(option.value || "").replace(/["']/g, "").trim();
+          return optionFont && currentFont && optionFont.toLowerCase() === currentFont.toLowerCase();
+        });
+        fontFamilySelect.value = matchingFont ? matchingFont.value : "";
+      }
+
+      const fontSizeSelect = wrapper.querySelector(`select[data-editor-action="fontSize"]`);
+      if (fontSizeSelect) {
+        const currentSize = String(textStyleAttrs.fontSize || "").trim();
+        fontSizeSelect.value = Array.from(fontSizeSelect.options).some(option => option.value === currentSize) ? currentSize : "";
+      }
+
+      const colorInput = wrapper.querySelector(`input[type="color"][data-editor-action="color"]`);
+      const currentColor = textStyleAttrs.color;
+      if (colorInput) {
+        colorInput.value = /^#[0-9a-f]{6}$/i.test(String(currentColor || "")) ? currentColor : "#000000";
+        this.updateColorControl(colorInput);
+      }
+    }
+
+    updateColorControl(control) {
+      const swatch = control.closest(".compact-color-control")?.querySelector(".tiptap-color-swatch");
+      if (swatch) swatch.style.background = control.value || "#000000";
+    }
+
     handleTextEditorAction(event) {
       const control = event.currentTarget;
       const action = control.dataset.editorAction;
@@ -863,23 +1123,42 @@
 
       if (!editor) return;
 
+      if (control.tagName === "SELECT" && event.type !== "change") {
+        return;
+      }
+
       if (control.tagName === "INPUT" && control.type === "color" && event.type !== "change") {
         return;
       }
 
       event.preventDefault();
 
-      if (action === "paragraph") editor.chain().focus().setParagraph().run();
-      if (action === "heading2") editor.chain().focus().toggleHeading({ level: 2 }).run();
+      if (action === "fontFamily") {
+        const value = control.value || null;
+        const chain = editor.chain().focus();
+        if (value) chain.setMark("textStyle", { fontFamily: value }).run();
+        else chain.setMark("textStyle", { fontFamily: null }).run();
+      }
+
+      if (action === "fontSize") {
+        const value = control.value || null;
+        const chain = editor.chain().focus();
+        if (value) chain.setMark("textStyle", { fontSize: value }).run();
+        else chain.setMark("textStyle", { fontSize: null }).run();
+      }
       if (action === "bold") editor.chain().focus().toggleBold().run();
       if (action === "italic") editor.chain().focus().toggleItalic().run();
       if (action === "underline") editor.chain().focus().toggleUnderline().run();
+      if (action === "strike") editor.chain().focus().toggleStrike().run();
       if (action === "bulletList") editor.chain().focus().toggleBulletList().run();
       if (action === "orderedList") editor.chain().focus().toggleOrderedList().run();
       if (action === "alignLeft") this.applyTextAlignment(editor, "left");
       if (action === "alignCenter") this.applyTextAlignment(editor, "center");
       if (action === "alignRight") this.applyTextAlignment(editor, "right");
-      if (action === "color") editor.chain().focus().setColor(control.value || "#111827").run();
+      if (action === "color") {
+        editor.chain().focus().setColor(control.value || "#000000").run();
+        this.updateColorControl(control);
+      }
 
       if (action === "link") {
         const previousUrl = editor.getAttributes("link").href || "";
@@ -915,6 +1194,7 @@
       if (action === "addColumn") editor.chain().focus().addColumnAfter().run();
       if (action === "deleteTable") editor.chain().focus().deleteTable().run();
 
+      this.updateTextToolbarState(path, editor);
       this.onChange();
     }
 
