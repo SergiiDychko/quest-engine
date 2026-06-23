@@ -419,6 +419,10 @@ function parseUtcDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function isGameWaiting(gameData) {
+  const startDate = parseUtcDate(gameData?.started_at);
+  return Boolean(startDate && new Date() < startDate);
+}
 
 function normalizeRunStatusForPlay(gameData) {
   if (!gameData) return gameData;
@@ -1094,23 +1098,18 @@ router.get("/:pin", (req, res) => {
       });
     }
 
-    if (gameData.started_at && gameData.run_status !== "ACTIVE") {
-      const startDate = parseUtcDate(gameData.started_at);
-      const now = new Date();
+    if (isGameWaiting(gameData)) {
+      return getGamePage(gameData.game_id, "START", (pageError, page) => {
+        if (pageError) {
+          return res.status(500).json({ error: "Помилка завантаження стартової сторінки" });
+        }
 
-      if (startDate && now < startDate) {
-        return getGamePage(gameData.game_id, "START", (pageError, page) => {
-          if (pageError) {
-            return res.status(500).json({ error: "Помилка завантаження стартової сторінки" });
-          }
-
-          return res.json({
-            status: "WAITING",
-            game: gameData,
-            page
-          });
+        return res.json({
+          status: "WAITING",
+          game: gameData,
+          page
         });
-      }
+      });
     }
 
     if (String(gameData.game_type || "LINEAR").toUpperCase() === "STORM") {
@@ -1383,6 +1382,10 @@ router.post("/:pin/answer", async (req, res) => {
     }
 
     normalizeRunStatusForPlay(gameData);
+
+    if (isGameWaiting(gameData)) {
+      return res.status(403).json({ error: "Гра ще не почалась" });
+    }
 
     if (gameData.run_status === "ARCHIVED") {
       return res.status(403).json({

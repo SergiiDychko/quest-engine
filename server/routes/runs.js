@@ -146,7 +146,8 @@ router.post("/", requireAuth, (req, res) => {
   const {
     game_id,
     title,
-    started_at
+    started_at,
+    pre_registration_enabled
   } = req.body;
 
   if (!game_id) {
@@ -197,16 +198,18 @@ router.post("/", requireAuth, (req, res) => {
           run_code,
           status,
           created_by,
-          started_at
+          started_at,
+          pre_registration_enabled
         )
-        VALUES (?, ?, ?, 'DRAFT', ?, ?)
+        VALUES (?, ?, ?, 'DRAFT', ?, ?, ?)
         `,
         [
           game_id,
           title.trim(),
           runCode,
           req.session.user.id,
-          started_at || null
+          started_at || null,
+          pre_registration_enabled ? 1 : 0
         ],
         function(error) {
           if (error) {
@@ -235,7 +238,8 @@ router.get("/game/:gameId", requireAuth, syncStatusesMiddleware, (req, res) => {
       title,
       status,
       started_at,
-      finished_at
+      finished_at,
+      COALESCE(pre_registration_enabled, 0) AS pre_registration_enabled
     FROM game_runs
     WHERE game_id = ?
       AND status != 'ARCHIVED'
@@ -265,7 +269,8 @@ router.post("/game/:gameId", requireAuth, (req, res) => {
 
   const {
     title,
-    started_at
+    started_at,
+    pre_registration_enabled
   } = req.body;
 
   if (!title || !title.trim()) {
@@ -284,13 +289,15 @@ router.post("/game/:gameId", requireAuth, (req, res) => {
       run_code,
       status,
       created_by,
-      started_at
+      started_at,
+      pre_registration_enabled
     )
     VALUES (
       ?,
       ?,
       ?,
       'DRAFT',
+      ?,
       ?,
       ?
     )
@@ -300,7 +307,8 @@ router.post("/game/:gameId", requireAuth, (req, res) => {
       title.trim(),
       runCode,
       req.session.user.id,
-      started_at || null
+      started_at || null,
+      pre_registration_enabled ? 1 : 0
     ],
     function(error) {
       if (error) {
@@ -388,6 +396,7 @@ router.get("/:id", requireAuth, syncStatusesMiddleware, (req, res) => {
       game_runs.status,
       game_runs.started_at,
       game_runs.finished_at,
+      COALESCE(game_runs.pre_registration_enabled, 0) AS pre_registration_enabled,
       COUNT(teams.id) AS teams_count
     FROM game_runs
     LEFT JOIN teams ON teams.run_id = game_runs.id
@@ -653,7 +662,7 @@ router.delete("/:id", requireAuth, (req, res) => {
 router.put("/:id", requireAuth, syncStatusesMiddleware, (req, res) => {
   const runId = req.params.id;
 
-  const { title, status, started_at, finished_at } = req.body;
+  const { title, status, started_at, finished_at, pre_registration_enabled } = req.body;
   const nextStatus = String(status || "DRAFT").toUpperCase();
 
   if (!["DRAFT", "ACTIVE", "ARCHIVED"].includes(nextStatus)) {
@@ -682,10 +691,11 @@ router.put("/:id", requireAuth, syncStatusesMiddleware, (req, res) => {
         title = ?,
         status = ?,
         started_at = ?,
-        finished_at = ?
+        finished_at = ?,
+        pre_registration_enabled = ?
       WHERE id = ?
       `,
-      [title, nextStatus, started_at || null, normalizedFinishedAt, runId],
+      [title, nextStatus, started_at || null, normalizedFinishedAt, pre_registration_enabled ? 1 : 0, runId],
       function(error) {
         if (error) {
           return res.status(500).json({ error: "Помилка оновлення запуску" });

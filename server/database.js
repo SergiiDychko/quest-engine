@@ -63,6 +63,7 @@ db.run(`
 
     started_at TEXT,
     finished_at TEXT,
+    pre_registration_enabled INTEGER NOT NULL DEFAULT 0,
 
     FOREIGN KEY (game_id) REFERENCES games(id),
     FOREIGN KEY (created_by) REFERENCES users(id)
@@ -326,6 +327,7 @@ db.run(`
 
   // Lightweight migrations for newer task mechanics.
 
+  db.run(`ALTER TABLE game_runs ADD COLUMN pre_registration_enabled INTEGER NOT NULL DEFAULT 0`, () => {});
   db.run(`ALTER TABLE tasks ADD COLUMN score_points INTEGER NOT NULL DEFAULT 0`, () => {});
   db.run(`ALTER TABLE task_hints ADD COLUMN hint_type TEXT NOT NULL DEFAULT 'TIMED'`, () => {});
   db.run(`ALTER TABLE task_hints ADD COLUMN purchase_after_seconds INTEGER NOT NULL DEFAULT 0`, () => {});

@@ -175,6 +175,7 @@ router.get("/:runCode", (req, res) => {
       game_runs.status,
       game_runs.started_at,
       game_runs.finished_at,
+      COALESCE(game_runs.pre_registration_enabled, 0) AS pre_registration_enabled,
       games.title AS game_title
     FROM game_runs
     JOIN games ON games.id = game_runs.game_id
@@ -196,7 +197,8 @@ router.get("/:runCode", (req, res) => {
         return res.status(403).json({ error: "Цей запуск уже в архіві" });
       }
 
-      const pageType = isRunWaiting(run) ? "START" : "JOIN";
+      const preRegistrationEnabled = Number(run.pre_registration_enabled) === 1;
+      const pageType = isRunWaiting(run) && !preRegistrationEnabled ? "START" : "JOIN";
 
       getGamePage(run.game_id, pageType, (pageError, page) => {
         if (pageError) {
@@ -224,7 +226,7 @@ router.post("/:runCode", (req, res) => {
   }
 
   db.get(
-    `SELECT id, game_id, status, started_at, finished_at FROM game_runs WHERE run_code = ?`,
+    `SELECT id, game_id, status, started_at, finished_at, COALESCE(pre_registration_enabled, 0) AS pre_registration_enabled FROM game_runs WHERE run_code = ?`,
     [runCode],
     (runError, run) => {
       if (runError) {
@@ -241,7 +243,7 @@ router.post("/:runCode", (req, res) => {
         return res.status(403).json({ error: "Цей запуск уже в архіві" });
       }
 
-      if (isRunWaiting(run)) {
+      if (isRunWaiting(run) && Number(run.pre_registration_enabled) !== 1) {
         return res.status(403).json({ error: "Гра ще не почалась" });
       }
 
