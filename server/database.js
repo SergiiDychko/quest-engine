@@ -2,7 +2,7 @@ const sqlite3 = require("sqlite3").verbose();
 const bcrypt = require("bcrypt");
 const path = require("path");
 
-const dbPath = path.join(__dirname, "../database/quest-engine.db");
+const dbPath = process.env.DB_PATH || path.join(__dirname, "../database/quest-engine.db");
 const db = new sqlite3.Database(dbPath);
 
 db.serialize(() => {

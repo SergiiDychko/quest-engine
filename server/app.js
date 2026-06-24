@@ -50,7 +50,8 @@ app.use(
   require("./routes/statistics")
 );
 
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+const uploadsPath = process.env.UPLOADS_PATH || path.join(__dirname, "../uploads");
+app.use("/uploads", express.static(uploadsPath));
 app.use(express.static(path.join(__dirname, "../client"), { index: false }));
 
 app.get("/", (req, res) => {
