@@ -50,6 +50,11 @@
           <input id="runTitle" type="text" placeholder="Наприклад: Ajax Systems Summer Quest" />
         </label>
 
+        <label class="checkbox-row">
+          <input id="adminRunPreRegistration" type="checkbox" />
+          <span>Відкрити попередню реєстрацію команд на гру</span>
+        </label>
+
         <div class="compact-run-bottom-row">
           <label>
             <span>Дата старту:</span>
@@ -203,10 +208,11 @@
       if (!time) { alert("Вкажіть час старту"); return; }
 
       const started_at = QETime.toUtcSqlFromLocalDateTime(date, time);
+      const pre_registration_enabled = document.getElementById("adminRunPreRegistration")?.checked || false;
       const response = await fetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ game_id: gameId, title, started_at })
+        body: JSON.stringify({ game_id: gameId, title, started_at, pre_registration_enabled })
       });
 
       const result = await response.json();

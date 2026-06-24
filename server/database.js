@@ -385,6 +385,9 @@ db.run(`
   db.run(`ALTER TABLE olympiad_cells ADD COLUMN purchase_value INTEGER NOT NULL DEFAULT 0`, () => {});
   db.run(`ALTER TABLE olympiad_cells ADD COLUMN task_answer_id INTEGER`, () => {});
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_olympiad_cells_task_cell ON olympiad_cells(task_id, cell_number)`);
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_game_permissions_game_user ON game_permissions(game_id, user_id)`);
+  db.run(`UPDATE users SET role = 'AUTHOR' WHERE role = 'MODERATOR'`, () => {});
+  db.run(`UPDATE users SET username = LOWER(email) WHERE (username IS NULL OR username = '') AND email IS NOT NULL`, () => {});
 
 });
 

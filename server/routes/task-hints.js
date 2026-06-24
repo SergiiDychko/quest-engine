@@ -1,5 +1,6 @@
 const express = require("express");
 const db = require("../database");
+const { getTaskAccess, requireCapability, handleAccessError } = require("../services/access");
 
 const router = express.Router();
 
@@ -11,7 +12,25 @@ function requireAuth(req, res, next) {
   next();
 }
 
-router.get("/:taskId", requireAuth, (req, res) => {
+
+function requireTaskCapability(capability) {
+  return async (req, res, next) => {
+    let taskId = Number(req.params.taskId);
+    try {
+      if (!taskId && req.params.hintId) {
+        const row = await new Promise((resolve, reject) => db.get(`SELECT task_id FROM task_hints WHERE id = ?`, [req.params.hintId], (error, result) => error ? reject(error) : resolve(result)));
+        taskId = Number(row?.task_id);
+      }
+      const access = await getTaskAccess(req.session.user, taskId);
+      requireCapability(access, capability);
+      next();
+    } catch (error) {
+      return handleAccessError(res, error, "Підказку не знайдено");
+    }
+  };
+}
+
+router.get("/:taskId", requireAuth, requireTaskCapability("canView"), (req, res) => {
   const taskId = req.params.taskId;
 
   db.all(
@@ -32,7 +51,7 @@ router.get("/:taskId", requireAuth, (req, res) => {
   );
 });
 
-router.post("/:taskId", requireAuth, (req, res) => {
+router.post("/:taskId", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const taskId = req.params.taskId;
 
   db.get(
@@ -73,7 +92,7 @@ router.post("/:taskId", requireAuth, (req, res) => {
   );
 });
 
-router.put("/:hintId", requireAuth, (req, res) => {
+router.put("/:hintId", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const hintId = req.params.hintId;
   const {
     hint_type,
@@ -118,7 +137,7 @@ router.put("/:hintId", requireAuth, (req, res) => {
   );
 });
 
-router.delete("/:hintId", requireAuth, (req, res) => {
+router.delete("/:hintId", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const hintId = req.params.hintId;
 
   db.serialize(() => {

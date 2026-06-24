@@ -1,5 +1,6 @@
 const express = require("express");
 const db = require("../database");
+const { getGameAccess, getRunAccess, requireCapability, handleAccessError } = require("../services/access");
 
 function generateCode(length = 6) {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -29,6 +30,19 @@ function requireAuth(req, res, next) {
 
 function buildPublicStatisticsUrl(req, runCode) {
   return `${req.protocol}://${req.get("host")}/public-statistics.html?run=${runCode}`;
+}
+
+
+function dbGetAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (error, row) => error ? reject(error) : resolve(row));
+  });
+}
+
+function dbAllAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows || []));
+  });
 }
 
 function dbRunAsync(sql, params = []) {
@@ -115,6 +129,24 @@ function syncStatusesMiddleware(req, res, next) {
 
 
 router.get("/active", requireAuth, syncStatusesMiddleware, (req, res) => {
+  const user = req.session.user;
+  const params = [];
+  let accessWhere = "";
+
+  if (user.role !== "ADMIN") {
+    accessWhere = `
+      AND (
+        games.created_by = ?
+        OR EXISTS (
+          SELECT 1 FROM game_permissions
+          WHERE game_permissions.game_id = games.id
+            AND game_permissions.user_id = ?
+        )
+      )
+    `;
+    params.push(user.id, user.id);
+  }
+
   db.all(
     `
     SELECT
@@ -127,9 +159,10 @@ router.get("/active", requireAuth, syncStatusesMiddleware, (req, res) => {
     FROM game_runs
     JOIN games ON games.id = game_runs.game_id
     WHERE game_runs.status IN ('DRAFT', 'ACTIVE')
+      ${accessWhere}
     ORDER BY game_runs.started_at DESC
     `,
-    [],
+    params,
     (error, runs) => {
       if (error) {
         return res.status(500).json({
@@ -188,6 +221,12 @@ router.post("/", requireAuth, (req, res) => {
         });
       }
 
+      getGameAccess(req.session.user, game_id)
+        .then(access => {
+          if (!access.canManageRuns) {
+            return res.status(403).json({ error: "Недостатньо прав для створення запуску цієї гри" });
+          }
+
       const runCode = generateCode();
 
       db.run(
@@ -224,12 +263,21 @@ router.post("/", requireAuth, (req, res) => {
           });
         }
       );
+        })
+        .catch(error => handleAccessError(res, error, "Гру не знайдено"));
     }
   );
 });
 
-router.get("/game/:gameId", requireAuth, syncStatusesMiddleware, (req, res) => {
-  const gameId = req.params.gameId;
+router.get("/game/:gameId", requireAuth, syncStatusesMiddleware, async (req, res) => {
+  const gameId = Number(req.params.gameId);
+
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canManageRuns");
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
 
   db.all(
     `
@@ -264,8 +312,15 @@ router.get("/game/:gameId", requireAuth, syncStatusesMiddleware, (req, res) => {
   );
 });
 
-router.post("/game/:gameId", requireAuth, (req, res) => {
-  const gameId = req.params.gameId;
+router.post("/game/:gameId", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.gameId);
+
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canManageRuns");
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
 
   const {
     title,
@@ -325,8 +380,15 @@ router.post("/game/:gameId", requireAuth, (req, res) => {
   );
 });
 
-router.get("/archive/game/:gameId", requireAuth, syncStatusesMiddleware, (req, res) => {
-  const gameId = req.params.gameId;
+router.get("/archive/game/:gameId", requireAuth, syncStatusesMiddleware, async (req, res) => {
+  const gameId = Number(req.params.gameId);
+
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canManageRuns");
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
 
   db.all(
     `
@@ -356,6 +418,24 @@ router.get("/archive/game/:gameId", requireAuth, syncStatusesMiddleware, (req, r
 
 
 router.get("/archive", requireAuth, syncStatusesMiddleware, (req, res) => {
+  const user = req.session.user;
+  const params = [];
+  let accessWhere = "";
+
+  if (user.role !== "ADMIN") {
+    accessWhere = `
+      AND (
+        games.created_by = ?
+        OR EXISTS (
+          SELECT 1 FROM game_permissions
+          WHERE game_permissions.game_id = games.id
+            AND game_permissions.user_id = ?
+        )
+      )
+    `;
+    params.push(user.id, user.id);
+  }
+
   db.all(
     `
     SELECT
@@ -368,9 +448,10 @@ router.get("/archive", requireAuth, syncStatusesMiddleware, (req, res) => {
     FROM game_runs
     JOIN games ON games.id = game_runs.game_id
     WHERE game_runs.status = 'ARCHIVED'
+      ${accessWhere}
     ORDER BY game_runs.started_at DESC
     `,
-    [],
+    params,
     (error, runs) => {
       if (error) {
         return res.status(500).json({
@@ -383,8 +464,15 @@ router.get("/archive", requireAuth, syncStatusesMiddleware, (req, res) => {
   );
 });
 
-router.get("/:id", requireAuth, syncStatusesMiddleware, (req, res) => {
-  const runId = req.params.id;
+router.get("/:id", requireAuth, syncStatusesMiddleware, async (req, res) => {
+  const runId = Number(req.params.id);
+
+  try {
+    const access = await getRunAccess(req.session.user, runId);
+    requireCapability(access, "canManageRuns");
+  } catch (error) {
+    return handleAccessError(res, error, "Запуск не знайдено");
+  }
 
   db.get(
     `
@@ -422,8 +510,15 @@ router.get("/:id", requireAuth, syncStatusesMiddleware, (req, res) => {
   );
 });
 
-router.get("/:id/teams", requireAuth, (req, res) => {
-  const runId = req.params.id;
+router.get("/:id/teams", requireAuth, async (req, res) => {
+  const runId = Number(req.params.id);
+
+  try {
+    const access = await getRunAccess(req.session.user, runId);
+    requireCapability(access, "canManageRuns");
+  } catch (error) {
+    return handleAccessError(res, error, "Запуск не знайдено");
+  }
 
   db.all(
     `
@@ -611,8 +706,15 @@ router.delete("/:runId/teams/:teamId", requireAuth, (req, res) => {
   );
 });
 
-router.delete("/:id", requireAuth, (req, res) => {
-  const runId = req.params.id;
+router.delete("/:id", requireAuth, async (req, res) => {
+  const runId = Number(req.params.id);
+
+  try {
+    const access = await getRunAccess(req.session.user, runId);
+    requireCapability(access, "canManageRuns");
+  } catch (error) {
+    return handleAccessError(res, error, "Запуск не знайдено");
+  }
 
   db.serialize(() => {
     db.run("BEGIN TRANSACTION");
@@ -659,8 +761,15 @@ router.delete("/:id", requireAuth, (req, res) => {
   });
 });
 
-router.put("/:id", requireAuth, syncStatusesMiddleware, (req, res) => {
-  const runId = req.params.id;
+router.put("/:id", requireAuth, syncStatusesMiddleware, async (req, res) => {
+  const runId = Number(req.params.id);
+
+  try {
+    const access = await getRunAccess(req.session.user, runId);
+    requireCapability(access, "canManageRuns");
+  } catch (error) {
+    return handleAccessError(res, error, "Запуск не знайдено");
+  }
 
   const { title, status, started_at, finished_at, pre_registration_enabled } = req.body;
   const nextStatus = String(status || "DRAFT").toUpperCase();

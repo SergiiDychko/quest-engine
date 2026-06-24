@@ -1108,6 +1108,24 @@ th.selected-stat-column-cell {
   margin: 8px 0 18px;
 }
 
+#gameMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+}
+
+.game-meta-separator {
+  color: #94a3b8;
+}
+
+.game-meta-permissions-btn {
+  margin-left: 8px;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+}
+
 .game-status-inline {
   display: flex;
   align-items: center;
@@ -5178,5 +5196,115 @@ body.profile-body .profile-meta-grid {
 
   body.profile-body .profile-meta-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Users and roles */
+.admin-wide-page .users-admin-card {
+  max-width: 1180px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.users-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.users-create-block {
+  margin-bottom: 22px;
+}
+
+.users-create-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: end;
+}
+
+.users-create-grid label,
+.game-permission-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.users-create-actions,
+.game-permission-form {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.users-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.users-table-header h2 {
+  margin: 0;
+}
+
+.users-table-header input {
+  max-width: 360px;
+}
+
+.role-save-message {
+  display: inline-block;
+  min-width: 72px;
+  margin-left: 8px;
+  color: #2563eb;
+  font-size: 0.9rem;
+}
+
+.user-role-select {
+  min-width: 170px;
+}
+
+.game-permissions-block {
+  margin: 18px 0 22px;
+}
+
+.game-permission-form {
+  padding: 12px 0 16px;
+}
+
+.game-permission-form label:first-child {
+  min-width: min(360px, 100%);
+  flex: 1 1 320px;
+}
+
+.game-permission-form label:nth-child(2) {
+  min-width: 180px;
+}
+
+.permissions-table {
+  margin-top: 10px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+@media (max-width: 760px) {
+  .users-create-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .users-table-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .users-table-header input {
+    max-width: none;
   }
 }

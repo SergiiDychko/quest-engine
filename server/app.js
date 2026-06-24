@@ -12,6 +12,7 @@ const joinRoutes = require("./routes/join");
 const playRoutes = require("./routes/play");
 const pagesRoutes = require("./routes/pages");
 const uploadRoutes = require("./routes/uploads");
+const userRoutes = require("./routes/users");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -42,6 +43,7 @@ app.use("/api/join", joinRoutes);
 app.use("/api/play", playRoutes);
 app.use("/api/pages", pagesRoutes);
 app.use("/api/uploads", uploadRoutes);
+app.use("/api/users", userRoutes);
 
 app.use(
   "/api/statistics",

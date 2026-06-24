@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Користувачі і ролі</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app admin-wide-page">
+    <section class="card users-admin-card">
+      <a href="/admin.html">← Назад</a>
+      <h1>Користувачі і ролі</h1>
+      <p class="muted-text">Створення користувачів, призначення ролей і базове керування доступом.</p>
+
+      <div class="users-toolbar">
+        <button id="showCreateUserBtn" type="button" class="large-action-btn">Створити нового користувача</button>
+      </div>
+
+      <section id="createUserBlock" class="info-block users-create-block hidden">
+        <h2>Створити нового користувача</h2>
+        <div class="users-create-grid">
+          <label>
+            <span>Логін</span>
+            <input id="newUsername" type="text" autocomplete="off">
+          </label>
+          <label>
+            <span>Пароль</span>
+            <input id="newPassword" type="text" autocomplete="off">
+          </label>
+          <label>
+            <span>Роль</span>
+            <select id="newRole">
+              <option value="AUTHOR">Автор</option>
+              <option value="ADMIN">Адміністратор</option>
+            </select>
+          </label>
+        </div>
+        <div class="users-create-actions">
+          <button id="createUserBtn" type="button">Створити користувача і скопіювати дані для входу</button>
+          <button id="refreshSuggestedCredentialsBtn" type="button">Згенерувати інші дані</button>
+        </div>
+        <p id="createUserMessage" class="inline-save-message"></p>
+      </section>
+
+      <section class="info-block">
+        <div class="users-table-header">
+          <h2>Наявні користувачі:</h2>
+          <input id="usersSearchInput" type="search" placeholder="Швидкий пошук користувачів..." autocomplete="off">
+        </div>
+
+        <div class="table-scroll">
+          <table class="codes-table users-table">
+            <thead>
+              <tr>
+                <th>Логін</th>
+                <th>Імʼя</th>
+                <th>Роль</th>
+                <th>Дії</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody">
+              <tr><td colspan="4">Завантаження...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    let currentUser = null;
+    let users = [];
+    let searchQuery = "";
+
+    function escapeHtml(text) {
+      return String(text || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function roleLabel(role) {
+      if (role === "ADMIN") return "Адміністратор";
+      if (role === "AUTHOR") return "Автор";
+      return role || "—";
+    }
+
+    async function checkAuth() {
+      const response = await fetch("/api/auth/me");
+      const result = await response.json();
+
+      if (!response.ok || !result.user) {
+        window.location.href = "/login.html";
+        return false;
+      }
+
+      if (result.user.role !== "ADMIN") {
+        document.querySelector(".users-admin-card").innerHTML = `
+          <a href="/admin.html">← Назад</a>
+          <h1>Недостатньо прав</h1>
+          <p>Ця сторінка доступна лише користувачам з роллю Адміністратор.</p>
+        `;
+        return false;
+      }
+
+      currentUser = result.user;
+      return true;
+    }
+
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+
+    async function loadSuggestedCredentials() {
+      const response = await fetch("/api/users/suggest");
+      const result = await response.json();
+      if (!response.ok) {
+        document.getElementById("createUserMessage").textContent = result.error || "Помилка генерації даних";
+        return;
+      }
+      document.getElementById("newUsername").value = result.username || "";
+      document.getElementById("newPassword").value = result.password || "";
+      document.getElementById("newRole").value = "AUTHOR";
+    }
+
+    async function loadUsers() {
+      const response = await fetch("/api/users");
+      const result = await response.json();
+      const tableBody = document.getElementById("usersTableBody");
+
+      if (!response.ok) {
+        tableBody.innerHTML = `<tr><td colspan="4">${escapeHtml(result.error || "Помилка завантаження")}</td></tr>`;
+        return;
+      }
+
+      users = result.users || [];
+      renderUsers();
+    }
+
+    function getFilteredUsers() {
+      const query = searchQuery.trim().toLowerCase();
+      if (!query) return users;
+      return users.filter(user => [user.username, user.name, roleLabel(user.role)]
+        .join(" ")
+        .toLowerCase()
+        .includes(query));
+    }
+
+    function renderUsers() {
+      const tableBody = document.getElementById("usersTableBody");
+      const filtered = getFilteredUsers();
+
+      if (!filtered.length) {
+        tableBody.innerHTML = '<tr><td colspan="4">Користувачів не знайдено.</td></tr>';
+        return;
+      }
+
+      tableBody.innerHTML = filtered.map(user => {
+        const isSelf = currentUser && Number(currentUser.id) === Number(user.id);
+        return `
+          <tr>
+            <td><strong>${escapeHtml(user.username)}</strong>${isSelf ? ' <span class="muted-text">(ви)</span>' : ''}</td>
+            <td>${escapeHtml(user.name || "—")}</td>
+            <td>
+              <select class="user-role-select" data-user-id="${user.id}" ${isSelf ? "disabled" : ""}>
+                <option value="AUTHOR" ${user.role === "AUTHOR" ? "selected" : ""}>Автор</option>
+                <option value="ADMIN" ${user.role === "ADMIN" ? "selected" : ""}>Адміністратор</option>
+              </select>
+              <span class="role-save-message" data-role-message-for="${user.id}"></span>
+            </td>
+            <td>
+              <button type="button" class="danger-btn delete-user-btn" data-user-id="${user.id}" ${isSelf ? "disabled" : ""}>Видалити</button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      document.querySelectorAll(".user-role-select").forEach(select => {
+        select.dataset.originalRole = select.value;
+        select.addEventListener("blur", () => saveRoleOnBlur(select));
+        select.addEventListener("keydown", event => {
+          if (event.key === "Enter") select.blur();
+        });
+      });
+
+      document.querySelectorAll(".delete-user-btn").forEach(button => {
+        button.addEventListener("click", () => deleteUser(Number(button.dataset.userId)));
+      });
+    }
+
+    async function saveRoleOnBlur(select) {
+      const userId = Number(select.dataset.userId);
+      const role = select.value;
+      const originalRole = select.dataset.originalRole;
+      const message = document.querySelector(`[data-role-message-for="${userId}"]`);
+
+      if (role === originalRole) return;
+      message.textContent = "Збереження...";
+
+      const response = await fetch(`/api/users/${userId}/role`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        select.value = originalRole;
+        message.textContent = result.error || "Помилка";
+        setTimeout(() => { message.textContent = ""; }, 3000);
+        return;
+      }
+
+      select.dataset.originalRole = role;
+      const user = users.find(item => Number(item.id) === userId);
+      if (user) user.role = role;
+      message.textContent = "✓";
+      setTimeout(() => { message.textContent = ""; }, 1800);
+    }
+
+    async function createUser() {
+      const username = document.getElementById("newUsername").value.trim();
+      const password = document.getElementById("newPassword").value;
+      const role = document.getElementById("newRole").value;
+      const message = document.getElementById("createUserMessage");
+      const button = document.getElementById("createUserBtn");
+
+      message.className = "inline-save-message";
+      message.textContent = "";
+      button.disabled = true;
+
+      try {
+        const response = await fetch("/api/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password, role })
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          message.textContent = result.error || "Помилка створення користувача";
+          return;
+        }
+
+        await copyText(`Логін: ${result.credentials.username}\nПароль: ${result.credentials.password}`);
+        message.className = "success-message";
+        message.textContent = "✓ Користувача створено. Дані для входу скопійовано в буфер обміну.";
+        setTimeout(() => { message.textContent = ""; }, 3000);
+        await loadUsers();
+        await loadSuggestedCredentials();
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function deleteUser(userId) {
+      const user = users.find(item => Number(item.id) === userId);
+      if (!user) return;
+
+      const confirmed = confirm(`Видалити користувача "${user.username}"?\n\nЙого власні ігри будуть передані поточному адміністратору.`);
+      if (!confirmed) return;
+
+      const password = prompt("Введіть пароль адміністратора для підтвердження видалення");
+      if (!password) return;
+
+      const response = await fetch(`/api/users/${userId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        alert(result.error || "Помилка видалення користувача");
+        return;
+      }
+
+      await loadUsers();
+    }
+
+    document.getElementById("showCreateUserBtn").addEventListener("click", async () => {
+      const block = document.getElementById("createUserBlock");
+      block.classList.toggle("hidden");
+      if (!block.classList.contains("hidden")) {
+        await loadSuggestedCredentials();
+        document.getElementById("newUsername").focus();
+      }
+    });
+
+    document.getElementById("refreshSuggestedCredentialsBtn").addEventListener("click", loadSuggestedCredentials);
+    document.getElementById("createUserBtn").addEventListener("click", createUser);
+    document.getElementById("usersSearchInput").addEventListener("input", event => {
+      searchQuery = event.target.value;
+      renderUsers();
+    });
+
+    async function init() {
+      if (!(await checkAuth())) return;
+      await loadUsers();
+    }
+
+    init();
+  </script>
+</body>
+</html>

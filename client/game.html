@@ -32,6 +32,8 @@
         <p id="gameMeta"></p>
       </div>
 
+      <div id="gamePermissionsBlock" class="info-block game-permissions-block hidden"></div>
+
       <hr />
 
       <h2>Сторінки гри</h2>
@@ -58,6 +60,9 @@ const params = new URLSearchParams(window.location.search);
 const gameId = params.get("id");
 
 let currentGame = null;
+let currentGameAccess = null;
+let gamePermissionUsers = [];
+let gamePermissions = [];
 let currentTasks = [];
 let currentPages = {};
 let availableGames = [];
@@ -98,13 +103,170 @@ async function loadGame() {
   }
 
   currentGame = result.game;
+  currentGameAccess = result.access || null;
 
   document.getElementById("gameTitle").textContent = currentGame.title;
   document.getElementById("gameStatusSelect").value = currentGame.status || "DRAFT";
   document.getElementById("gameMeta").innerHTML = `
-    Механіка: <strong>${currentGame.game_type}</strong><br>
-    Умова перемоги: <strong>${currentGame.winner_type}</strong>
+    <span>Механіка: <strong>${currentGame.game_type}</strong></span>
+    <span class="game-meta-separator">|</span>
+    <span>Умова перемоги: <strong>${currentGame.winner_type}</strong></span>
+    <span class="game-meta-separator">|</span>
+    <span>Автор: <strong>${escapeHtml(currentGame.author_name || currentGame.author_username || "—")}</strong></span>
+    <button id="toggleGamePermissionsBtn" type="button" class="secondary-btn game-meta-permissions-btn hidden">Надати дозвіл на гру</button>
   `;
+
+  document.getElementById("toggleGamePermissionsBtn")?.addEventListener("click", toggleGamePermissionsBlock);
+
+  if (currentGameAccess && !currentGameAccess.can_edit) {
+    document.getElementById("gameStatusSelect").disabled = true;
+    document.getElementById("addTaskBtn").disabled = true;
+    document.getElementById("addTaskBtn").title = "У вас є доступ до перегляду гри і керування запусками, але не до редагування гри";
+  }
+}
+
+async function loadGamePermissions() {
+  const block = document.getElementById("gamePermissionsBlock");
+
+  try {
+    const response = await fetch(`/api/games/${gameId}/permissions`);
+    const result = await response.json();
+
+    if (!response.ok) {
+      block.classList.add("hidden");
+      return;
+    }
+
+    gamePermissionUsers = result.users || [];
+    gamePermissions = result.permissions || [];
+    renderGamePermissions(result.access || {});
+  } catch (error) {
+    console.error("Помилка завантаження дозволів гри", error);
+    block.classList.add("hidden");
+  }
+}
+
+function permissionLabel(permission) {
+  return permission === "EDIT" ? "Редагування" : "Перегляд";
+}
+
+function toggleGamePermissionsBlock() {
+  const block = document.getElementById("gamePermissionsBlock");
+  const button = document.getElementById("toggleGamePermissionsBtn");
+  const willOpen = block.classList.contains("hidden");
+
+  block.classList.toggle("hidden", !willOpen);
+  if (button) {
+    button.textContent = willOpen ? "Сховати дозволи" : "Надати дозвіл на гру";
+  }
+}
+
+function renderGamePermissions(access) {
+  const block = document.getElementById("gamePermissionsBlock");
+  const toggleButton = document.getElementById("toggleGamePermissionsBtn");
+  const wasOpen = !block.classList.contains("hidden");
+
+  if (!access.can_edit_permissions) {
+    block.classList.add("hidden");
+    toggleButton?.classList.add("hidden");
+    return;
+  }
+
+  toggleButton?.classList.remove("hidden");
+  if (toggleButton) {
+    toggleButton.textContent = wasOpen ? "Сховати дозволи" : "Надати дозвіл на гру";
+  }
+
+  const options = gamePermissionUsers.map(user => `
+    <option value="${Number(user.id)}">${escapeHtml(user.username || user.name || `Користувач #${user.id}`)}</option>
+  `).join("");
+
+  const rows = gamePermissions.length
+    ? gamePermissions.map(item => `
+      <tr>
+        <td>${escapeHtml(item.username || item.name || `Користувач #${item.user_id}`)}</td>
+        <td>${escapeHtml(item.name || "—")}</td>
+        <td>${permissionLabel(item.permission)}</td>
+        <td><button type="button" class="danger-btn" onclick="deleteGamePermission(${Number(item.id)})">Скасувати</button></td>
+      </tr>
+    `).join("")
+    : '<tr><td colspan="4">Додаткових дозволів поки немає.</td></tr>';
+
+  block.innerHTML = `
+    <h2>Надати дозвіл на гру</h2>
+    <p class="muted-text">Автор гри або адміністратор може надати іншому автору право перегляду або редагування.</p>
+    <div class="game-permission-form">
+      <label>
+        <span>Користувач</span>
+        <input id="permissionUserSearchInput" list="permissionUsersList" placeholder="Почніть вводити логін або імʼя">
+        <datalist id="permissionUsersList">
+          ${gamePermissionUsers.map(user => `<option value="${escapeHtml(user.username || user.name || '')}" data-user-id="${Number(user.id)}"></option>`).join("")}
+        </datalist>
+      </label>
+      <label>
+        <span>Дозвіл</span>
+        <select id="permissionTypeSelect">
+          <option value="VIEW">Перегляд</option>
+          <option value="EDIT">Редагування</option>
+        </select>
+      </label>
+      <button id="saveGamePermissionBtn" type="button">Надати дозвіл</button>
+      <span id="gamePermissionMessage"></span>
+    </div>
+    <table class="codes-table permissions-table">
+      <thead><tr><th>Логін</th><th>Імʼя</th><th>Дозвіл</th><th>Дії</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  block.classList.toggle("hidden", !wasOpen);
+  document.getElementById("saveGamePermissionBtn")?.addEventListener("click", saveGamePermission);
+}
+
+function findPermissionUserIdByInput(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  const user = gamePermissionUsers.find(item =>
+    String(item.username || "").toLowerCase() === normalized ||
+    String(item.name || "").toLowerCase() === normalized
+  );
+  return user ? Number(user.id) : 0;
+}
+
+async function saveGamePermission() {
+  const message = document.getElementById("gamePermissionMessage");
+  const userId = findPermissionUserIdByInput(document.getElementById("permissionUserSearchInput").value);
+  const permission = document.getElementById("permissionTypeSelect").value;
+
+  message.textContent = "";
+  if (!userId) {
+    message.textContent = "Оберіть користувача зі списку";
+    return;
+  }
+
+  const response = await fetch(`/api/games/${gameId}/permissions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, permission })
+  });
+  const result = await response.json();
+
+  if (!response.ok) {
+    message.textContent = result.error || "Помилка збереження дозволу";
+    return;
+  }
+
+  await loadGamePermissions();
+}
+
+async function deleteGamePermission(permissionId) {
+  if (!confirm("Скасувати цей дозвіл?")) return;
+  const response = await fetch(`/api/games/${gameId}/permissions/${permissionId}`, { method: "DELETE" });
+  const result = await response.json();
+  if (!response.ok) {
+    alert(result.error || "Помилка скасування дозволу");
+    return;
+  }
+  await loadGamePermissions();
 }
 
 async function loadTasks() {
@@ -851,6 +1013,7 @@ window.addEventListener("beforeunload", event => {
 async function init() {
   await checkAuth();
   await loadGame();
+  await loadGamePermissions();
   await loadPages();
   await loadTasks();
   await loadAvailableGames();

@@ -1,5 +1,6 @@
 const express = require("express");
 const db = require("../database");
+const { getTaskAccess, requireCapability, handleAccessError } = require("../services/access");
 
 const router = express.Router();
 
@@ -11,7 +12,25 @@ function requireAuth(req, res, next) {
   next();
 }
 
-router.get("/:taskId", requireAuth, (req, res) => {
+
+function requireTaskCapability(capability) {
+  return async (req, res, next) => {
+    let taskId = Number(req.params.taskId);
+    try {
+      if (!taskId && req.params.id) {
+        const row = await new Promise((resolve, reject) => db.get(`SELECT task_id FROM task_content WHERE id = ?`, [req.params.id], (error, result) => error ? reject(error) : resolve(result)));
+        taskId = Number(row?.task_id);
+      }
+      const access = await getTaskAccess(req.session.user, taskId);
+      requireCapability(access, capability);
+      next();
+    } catch (error) {
+      return handleAccessError(res, error, "Контент не знайдено");
+    }
+  };
+}
+
+router.get("/:taskId", requireAuth, requireTaskCapability("canView"), (req, res) => {
   const taskId = req.params.taskId;
 
   db.all(
@@ -32,7 +51,7 @@ router.get("/:taskId", requireAuth, (req, res) => {
   );
 });
 
-router.post("/:taskId", requireAuth, (req, res) => {
+router.post("/:taskId", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const taskId = req.params.taskId;
   const { type, content } = req.body;
 
@@ -80,7 +99,7 @@ router.post("/:taskId", requireAuth, (req, res) => {
 });
 
 
-router.put("/:taskId/bulk", requireAuth, (req, res) => {
+router.put("/:taskId/bulk", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const taskId = req.params.taskId;
   const { blocks } = req.body || {};
 
@@ -191,7 +210,7 @@ router.put("/:taskId/bulk", requireAuth, (req, res) => {
   });
 });
 
-router.put("/item/:id", requireAuth, (req, res) => {
+router.put("/item/:id", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const contentId = req.params.id;
   const { content } = req.body;
 
@@ -216,7 +235,7 @@ router.put("/item/:id", requireAuth, (req, res) => {
   );
 });
 
-router.delete("/item/:id", requireAuth, (req, res) => {
+router.delete("/item/:id", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const contentId = req.params.id;
 
   db.run(

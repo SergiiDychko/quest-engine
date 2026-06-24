@@ -1,5 +1,6 @@
 const express = require("express");
 const db = require("../database");
+const { getTaskAccess, requireCapability, handleAccessError } = require("../services/access");
 
 const router = express.Router();
 
@@ -38,6 +39,20 @@ function dbRun(sql, params = []) {
   });
 }
 
+
+
+function requireTaskCapability(capability) {
+  return async (req, res, next) => {
+    const taskId = Number(req.params.id || req.params.taskId);
+    try {
+      const access = await getTaskAccess(req.session.user, taskId);
+      requireCapability(access, capability);
+      next();
+    } catch (error) {
+      return handleAccessError(res, error, "Завдання не знайдено");
+    }
+  };
+}
 
 function normalizeCodeForDuplicateCheck(value) {
   return String(value || "")
@@ -104,7 +119,7 @@ function getOlympiadTotalCells(associationCount, levelCount) {
   return generateOlympiadCellsMeta(associationCount, levelCount).length;
 }
 
-router.get("/:id", requireAuth, (req, res) => {
+router.get("/:id", requireAuth, requireTaskCapability("canView"), (req, res) => {
   const taskId = req.params.id;
 
   db.get(`SELECT * FROM tasks WHERE id = ?`, [taskId], (error, task) => {
@@ -122,7 +137,7 @@ router.get("/:id", requireAuth, (req, res) => {
   });
 });
 
-router.put("/:id", requireAuth, (req, res) => {
+router.put("/:id", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const taskId = req.params.id;
   const {
     title,
@@ -196,7 +211,7 @@ router.put("/:id", requireAuth, (req, res) => {
 });
 
 
-router.get("/:id/olympiad", requireAuth, async (req, res) => {
+router.get("/:id/olympiad", requireAuth, requireTaskCapability("canView"), async (req, res) => {
   const taskId = req.params.id;
 
   try {
@@ -251,7 +266,7 @@ router.get("/:id/olympiad", requireAuth, async (req, res) => {
   }
 });
 
-router.put("/:id/olympiad", requireAuth, async (req, res) => {
+router.put("/:id/olympiad", requireAuth, requireTaskCapability("canEdit"), async (req, res) => {
   const taskId = req.params.id;
   const associationCount = Number(req.body.association_count);
   const levelCount = Number(req.body.level_count);
@@ -404,7 +419,7 @@ router.put("/:id/olympiad", requireAuth, async (req, res) => {
   }
 });
 
-router.delete("/:id", requireAuth, (req, res) => {
+router.delete("/:id", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const taskId = req.params.id;
 
   db.get(
@@ -481,7 +496,7 @@ router.delete("/:id", requireAuth, (req, res) => {
   );
 });
 
-router.put("/:id/settings", requireAuth, (req, res) => {
+router.put("/:id/settings", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const taskId = req.params.id;
   const {
     auto_transition_enabled,
@@ -514,7 +529,7 @@ router.put("/:id/settings", requireAuth, (req, res) => {
   );
 });
 
-router.post("/:id/answers", requireAuth, (req, res) => {
+router.post("/:id/answers", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const taskId = req.params.id;
   const { count, answer_type } = req.body;
   const codesCount = Number(count);
@@ -557,7 +572,7 @@ router.post("/:id/answers", requireAuth, (req, res) => {
   );
 });
 
-router.put("/:id/answers", requireAuth, (req, res) => {
+router.put("/:id/answers", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const taskId = req.params.id;
   const { required_main_answers, answers } = req.body;
 
@@ -615,7 +630,7 @@ router.put("/:id/answers", requireAuth, (req, res) => {
   });
 });
 
-router.delete("/:taskId/answers/:answerId", requireAuth, (req, res) => {
+router.delete("/:taskId/answers/:answerId", requireAuth, requireTaskCapability("canEdit"), (req, res) => {
   const { taskId, answerId } = req.params;
 
   db.run(
@@ -629,7 +644,7 @@ router.delete("/:taskId/answers/:answerId", requireAuth, (req, res) => {
 });
 
 
-router.get("/:id/multitask", requireAuth, async (req, res) => {
+router.get("/:id/multitask", requireAuth, requireTaskCapability("canView"), async (req, res) => {
   const taskId = req.params.id;
 
   try {
@@ -655,7 +670,7 @@ router.get("/:id/multitask", requireAuth, async (req, res) => {
   }
 });
 
-router.put("/:id/multitask", requireAuth, async (req, res) => {
+router.put("/:id/multitask", requireAuth, requireTaskCapability("canEdit"), async (req, res) => {
   const taskId = req.params.id;
   const completionType = String(req.body.completion_type || "ALL").toUpperCase();
   const subtasks = Array.isArray(req.body.subtasks) ? req.body.subtasks : [];

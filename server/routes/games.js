@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../database");
 const bcrypt = require("bcrypt");
+const { getGameAccess, requireCapability, handleAccessError } = require("../services/access");
 
 const router = express.Router();
 
@@ -447,34 +448,192 @@ router.post("/", requireAuth, (req, res) => {
   );
 });
 
-router.get("/:id", requireAuth, (req, res) => {
-  const gameId = req.params.id;
 
-  db.get(
-    `
-    SELECT *
-    FROM games
-    WHERE id = ?
-    `,
-    [gameId],
-    (error, game) => {
-      if (error) {
-        return res.status(500).json({ error: "Помилка отримання гри" });
-      }
+router.get("/:id/permissions", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.id);
 
-      if (!game) {
-        return res.status(404).json({ error: "Гру не знайдено" });
-      }
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canView");
 
-      res.json({ game });
+    const canEditPermissions = req.session.user.role === "ADMIN" || access.isOwner;
+
+    const permissions = await dbAll(
+      `
+      SELECT
+        game_permissions.id,
+        game_permissions.game_id,
+        game_permissions.user_id,
+        game_permissions.permission,
+        users.username,
+        users.name,
+        users.role
+      FROM game_permissions
+      JOIN users ON users.id = game_permissions.user_id
+      WHERE game_permissions.game_id = ?
+      ORDER BY LOWER(users.username) ASC
+      `,
+      [gameId]
+    );
+
+    let users = [];
+    if (canEditPermissions) {
+      users = await dbAll(
+        `
+        SELECT id, username, name, role
+        FROM users
+        WHERE role = 'AUTHOR'
+          AND id NOT IN (
+            SELECT created_by FROM games WHERE id = ?
+          )
+        ORDER BY LOWER(username) ASC
+        `,
+        [gameId]
+      );
     }
-  );
+
+    res.json({
+      permissions,
+      users,
+      access: {
+        can_edit_permissions: canEditPermissions,
+        can_view: access.canView,
+        can_edit: access.canEdit,
+        is_owner: access.isOwner,
+        permission: access.permission
+      }
+    });
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
+});
+
+router.post("/:id/permissions", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.id);
+  const userId = Number(req.body.user_id);
+  const permission = String(req.body.permission || "").toUpperCase();
+
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canView");
+
+    if (req.session.user.role !== "ADMIN" && !access.isOwner) {
+      return res.status(403).json({ error: "Дозволи може змінювати тільки автор гри або адміністратор" });
+    }
+
+    if (!userId) {
+      return res.status(400).json({ error: "Оберіть користувача" });
+    }
+
+    if (!["VIEW", "EDIT"].includes(permission)) {
+      return res.status(400).json({ error: "Некоректний рівень доступу" });
+    }
+
+    const game = await dbGet(`SELECT id, created_by FROM games WHERE id = ?`, [gameId]);
+    if (!game) {
+      return res.status(404).json({ error: "Гру не знайдено" });
+    }
+
+    if (Number(game.created_by) === userId) {
+      return res.status(400).json({ error: "Автор гри вже має повний доступ" });
+    }
+
+    const targetUser = await dbGet(`SELECT id, role FROM users WHERE id = ?`, [userId]);
+    if (!targetUser) {
+      return res.status(404).json({ error: "Користувача не знайдено" });
+    }
+
+    if (targetUser.role !== "AUTHOR") {
+      return res.status(400).json({ error: "Доступ до гри можна надавати тільки авторам" });
+    }
+
+    await dbRun(
+      `
+      INSERT INTO game_permissions (game_id, user_id, permission)
+      VALUES (?, ?, ?)
+      ON CONFLICT(game_id, user_id)
+      DO UPDATE SET permission = excluded.permission
+      `,
+      [gameId, userId, permission]
+    );
+
+    res.json({ message: "Дозвіл збережено" });
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
+});
+
+router.delete("/:id/permissions/:permissionId", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.id);
+  const permissionId = Number(req.params.permissionId);
+
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canView");
+
+    if (req.session.user.role !== "ADMIN" && !access.isOwner) {
+      return res.status(403).json({ error: "Дозволи може змінювати тільки автор гри або адміністратор" });
+    }
+
+    const result = await dbRun(
+      `DELETE FROM game_permissions WHERE id = ? AND game_id = ?`,
+      [permissionId, gameId]
+    );
+
+    if (!result.changes) {
+      return res.status(404).json({ error: "Дозвіл не знайдено" });
+    }
+
+    res.json({ message: "Дозвіл скасовано" });
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
+});
+
+router.get("/:id", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.id);
+
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canView");
+
+    const game = await dbGet(
+      `
+      SELECT games.*, users.username AS author_username, users.name AS author_name
+      FROM games
+      LEFT JOIN users ON users.id = games.created_by
+      WHERE games.id = ?
+      `,
+      [gameId]
+    );
+
+    res.json({
+      game,
+      access: {
+        can_view: access.canView,
+        can_edit: access.canEdit,
+        can_delete: access.canDelete,
+        can_manage_runs: access.canManageRuns,
+        is_owner: access.isOwner,
+        permission: access.permission
+      }
+    });
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
 });
 
 
-router.put("/:id/status", requireAuth, (req, res) => {
-  const gameId = req.params.id;
+router.put("/:id/status", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.id);
   const { status } = req.body;
+
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canEdit");
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
 
   if (!["DRAFT", "READY"].includes(status)) {
     return res.status(400).json({ error: "Некоректний статус гри" });
@@ -503,30 +662,39 @@ router.put("/:id/status", requireAuth, (req, res) => {
   );
 });
 
-router.get("/:id/tasks", requireAuth, (req, res) => {
-  const gameId = req.params.id;
+router.get("/:id/tasks", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.id);
 
-  db.all(
-    `
-    SELECT *
-    FROM tasks
-    WHERE game_id = ?
-    ORDER BY sort_order ASC
-    `,
-    [gameId],
-    (error, tasks) => {
-      if (error) {
-        return res.status(500).json({ error: "Помилка отримання завдань" });
-      }
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canView");
 
-      res.json({ tasks });
-    }
-  );
+    const tasks = await dbAll(
+      `
+      SELECT *
+      FROM tasks
+      WHERE game_id = ?
+      ORDER BY sort_order ASC
+      `,
+      [gameId]
+    );
+
+    res.json({ tasks });
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
 });
 
-router.post("/:id/tasks", requireAuth, (req, res) => {
-  const gameId = req.params.id;
+router.post("/:id/tasks", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.id);
   const { title, task_type } = req.body;
+
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canEdit");
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
 
   db.get(
     `
@@ -588,6 +756,9 @@ router.put("/:id/tasks/reorder", requireAuth, async (req, res) => {
   }
 
   try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canEdit");
+
     const existingTasks = await dbAll(
       `SELECT id FROM tasks WHERE game_id = ? ORDER BY sort_order ASC, id ASC`,
       [gameId]
@@ -631,6 +802,11 @@ router.post("/:id/tasks/:taskId/copy", requireAuth, async (req, res) => {
   }
 
   try {
+    const sourceAccess = await getGameAccess(req.session.user, sourceGameId);
+    requireCapability(sourceAccess, "canView");
+    const targetAccess = await getGameAccess(req.session.user, targetGameId);
+    requireCapability(targetAccess, "canEdit");
+
     const task = await dbGet(
       `SELECT id, game_id FROM tasks WHERE id = ? AND game_id = ?`,
       [sourceTaskId, sourceGameId]
@@ -689,7 +865,8 @@ router.delete("/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Гру не знайдено" });
     }
 
-    if (user.role !== "ADMIN" && Number(game.created_by) !== Number(user.id)) {
+    const access = await getGameAccess(user, gameId);
+    if (!access.canDelete) {
       return res.status(403).json({ error: "Недостатньо прав для видалення цієї гри" });
     }
 
@@ -769,6 +946,9 @@ router.post("/:id/copy", requireAuth, async (req, res) => {
   }
 
   try {
+    const sourceAccess = await getGameAccess(user, sourceGameId);
+    requireCapability(sourceAccess, "canView");
+
     const sourceGame = await dbGet(`SELECT * FROM games WHERE id = ?`, [sourceGameId]);
     if (!sourceGame) {
       return res.status(404).json({ error: "Гру не знайдено" });

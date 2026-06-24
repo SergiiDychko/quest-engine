@@ -1,5 +1,6 @@
 const express = require("express");
 const db = require("../database");
+const { getGameAccess, getRunAccess, requireCapability, handleAccessError } = require("../services/access");
 
 const router = express.Router();
 
@@ -40,8 +41,15 @@ function defaultPage(pageType) {
   return defaults[pageType];
 }
 
-router.get("/game/:gameId", requireAuth, (req, res) => {
-  const gameId = req.params.gameId;
+router.get("/game/:gameId", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.gameId);
+
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canView");
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
 
   db.all(
     `
@@ -80,9 +88,16 @@ router.get("/game/:gameId", requireAuth, (req, res) => {
   );
 });
 
-router.put("/game/:gameId/:pageType", requireAuth, (req, res) => {
-  const gameId = req.params.gameId;
+router.put("/game/:gameId/:pageType", requireAuth, async (req, res) => {
+  const gameId = Number(req.params.gameId);
   const pageType = String(req.params.pageType || "").toUpperCase();
+
+  try {
+    const access = await getGameAccess(req.session.user, gameId);
+    requireCapability(access, "canEdit");
+  } catch (error) {
+    return handleAccessError(res, error, "Гру не знайдено");
+  }
 
   if (!isValidPageType(pageType)) {
     return res.status(400).json({
@@ -135,8 +150,15 @@ router.put("/game/:gameId/:pageType", requireAuth, (req, res) => {
   );
 });
 
-router.get("/run/:runId", requireAuth, (req, res) => {
-  const runId = req.params.runId;
+router.get("/run/:runId", requireAuth, async (req, res) => {
+  const runId = Number(req.params.runId);
+
+  try {
+    const access = await getRunAccess(req.session.user, runId);
+    requireCapability(access, "canManageRuns");
+  } catch (error) {
+    return handleAccessError(res, error, "Запуск не знайдено");
+  }
 
   db.all(
     `
@@ -167,9 +189,16 @@ router.get("/run/:runId", requireAuth, (req, res) => {
   );
 });
 
-router.put("/run/:runId/:pageType", requireAuth, (req, res) => {
-  const runId = req.params.runId;
+router.put("/run/:runId/:pageType", requireAuth, async (req, res) => {
+  const runId = Number(req.params.runId);
   const pageType = String(req.params.pageType || "").toUpperCase();
+
+  try {
+    const access = await getRunAccess(req.session.user, runId);
+    requireCapability(access, "canManageRuns");
+  } catch (error) {
+    return handleAccessError(res, error, "Запуск не знайдено");
+  }
 
   if (!isValidPageType(pageType)) {
     return res.status(400).json({
