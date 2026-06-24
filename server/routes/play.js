@@ -510,6 +510,227 @@ function completeTaskIfNeeded(teamId, task, callback) {
 }
 
 
+function getVisibleTaskContent(teamId, taskId) {
+  return dbAll(
+    `
+    SELECT *
+    FROM task_content
+    WHERE task_id = ?
+    ORDER BY sort_order ASC, id ASC
+    `,
+    [taskId]
+  );
+}
+
+async function getOlympiadPayload(teamId, taskId) {
+  const settings = await dbGet(
+    `SELECT * FROM olympiad_settings WHERE task_id = ?`,
+    [taskId]
+  );
+
+  if (!settings) {
+    return null;
+  }
+
+  const cells = await dbAll(
+    `
+    SELECT
+      olympiad_cells.*,
+      CASE WHEN team_found_answers.id IS NULL THEN 0 ELSE 1 END AS is_found
+    FROM olympiad_cells
+    LEFT JOIN team_found_answers
+      ON team_found_answers.task_answer_id = olympiad_cells.task_answer_id
+     AND team_found_answers.team_id = ?
+    WHERE olympiad_cells.task_id = ?
+    ORDER BY olympiad_cells.level_number ASC, olympiad_cells.cell_number ASC, olympiad_cells.id ASC
+    `,
+    [teamId, taskId]
+  );
+
+  return {
+    settings,
+    cells: cells.map(cell => ({
+      ...cell,
+      is_found: Boolean(cell.is_found)
+    }))
+  };
+}
+
+async function getMultitaskPayload(teamId, taskId) {
+  const settings = await dbGet(
+    `SELECT * FROM multitask_settings WHERE task_id = ?`,
+    [taskId]
+  );
+
+  const foundRows = await dbAll(
+    `
+    SELECT task_answers.id, task_answers.answer_text
+    FROM team_found_answers
+    JOIN task_answers ON task_answers.id = team_found_answers.task_answer_id
+    WHERE team_found_answers.team_id = ?
+      AND task_answers.task_id = ?
+    `,
+    [teamId, taskId]
+  );
+
+  const foundAnswerIds = new Set(foundRows.map(row => Number(row.id)));
+  const foundCodes = new Set(foundRows.map(row => normalizeAnswer(row.answer_text)));
+
+  const subtasks = await dbAll(
+    `
+    SELECT
+      multitask_subtasks.*,
+      CASE WHEN team_multitask_hint_purchases.id IS NULL THEN 0 ELSE 1 END AS hint_purchased
+    FROM multitask_subtasks
+    LEFT JOIN team_multitask_hint_purchases
+      ON team_multitask_hint_purchases.multitask_subtask_id = multitask_subtasks.id
+     AND team_multitask_hint_purchases.team_id = ?
+    WHERE multitask_subtasks.task_id = ?
+    ORDER BY multitask_subtasks.sort_order ASC, multitask_subtasks.id ASC
+    `,
+    [teamId, taskId]
+  );
+
+  return {
+    settings: settings || null,
+    subtasks: subtasks.map(subtask => {
+      const revealCondition = String(subtask.reveal_condition || "IMMEDIATE").toUpperCase();
+      let isVisible = true;
+
+      if (revealCondition === "CODE") {
+        const requiredCode = normalizeAnswer(subtask.reveal_code || "");
+        isVisible = Boolean(requiredCode && foundCodes.has(requiredCode));
+      }
+
+      const isFound = subtask.task_answer_id
+        ? foundAnswerIds.has(Number(subtask.task_answer_id))
+        : false;
+
+      return {
+        ...subtask,
+        is_visible: isVisible,
+        is_found: isFound,
+        hint_purchased: Boolean(subtask.hint_purchased)
+      };
+    })
+  };
+}
+
+async function isMultitaskAnswerCurrentlyHidden(teamId, taskId, taskAnswerId) {
+  const subtask = await dbGet(
+    `
+    SELECT *
+    FROM multitask_subtasks
+    WHERE task_id = ?
+      AND task_answer_id = ?
+    LIMIT 1
+    `,
+    [taskId, taskAnswerId]
+  );
+
+  if (!subtask) return false;
+
+  const revealCondition = String(subtask.reveal_condition || "IMMEDIATE").toUpperCase();
+  if (revealCondition !== "CODE") return false;
+
+  const requiredCode = normalizeAnswer(subtask.reveal_code || "");
+  if (!requiredCode) return true;
+
+  const found = await dbGet(
+    `
+    SELECT task_answers.id
+    FROM team_found_answers
+    JOIN task_answers ON task_answers.id = team_found_answers.task_answer_id
+    WHERE team_found_answers.team_id = ?
+      AND task_answers.task_id = ?
+      AND LOWER(TRIM(task_answers.answer_text)) = ?
+    LIMIT 1
+    `,
+    [teamId, taskId, requiredCode]
+  );
+
+  return !found;
+}
+
+async function checkOlympiadCompletion(teamId, task) {
+  const settings = await dbGet(
+    `SELECT * FROM olympiad_settings WHERE task_id = ?`,
+    [task.id]
+  );
+
+  let requiredMainAnswers = Number(task.required_main_answers) || 0;
+
+  if (settings) {
+    const completionType = String(settings.completion_type || "TOP_CELL").toUpperCase();
+    if (completionType === "COUNT") {
+      requiredMainAnswers = Number(settings.required_cells_count) || requiredMainAnswers;
+    }
+  }
+
+  if (!requiredMainAnswers) {
+    const totalRow = await dbGet(
+      `SELECT COUNT(*) AS total_main FROM task_answers WHERE task_id = ? AND answer_type = 'MAIN'`,
+      [task.id]
+    );
+    requiredMainAnswers = Number(totalRow?.total_main) || 1;
+  }
+
+  const foundRow = await dbGet(
+    `
+    SELECT COUNT(*) AS found_main
+    FROM team_found_answers
+    JOIN task_answers ON task_answers.id = team_found_answers.task_answer_id
+    WHERE team_found_answers.team_id = ?
+      AND task_answers.task_id = ?
+      AND task_answers.answer_type = 'MAIN'
+    `,
+    [teamId, task.id]
+  );
+
+  const foundMain = Number(foundRow?.found_main) || 0;
+
+  if (foundMain < requiredMainAnswers) {
+    return {
+      completed: false,
+      found_main: foundMain,
+      required_main_answers: requiredMainAnswers
+    };
+  }
+
+  const completedAtRow = await dbGet(`SELECT CURRENT_TIMESTAMP AS completed_at`);
+  const completedAt = completedAtRow?.completed_at || null;
+
+  await dbRun(
+    `
+    UPDATE team_tasks
+    SET completed_at = ?
+    WHERE team_id = ?
+      AND task_id = ?
+      AND completed_at IS NULL
+    `,
+    [completedAt, teamId, task.id]
+  );
+
+  await addTaskCompletionScoreIfNeeded(teamId, task);
+
+  if (String(task.game_type || "LINEAR").toUpperCase() !== "STORM") {
+    await new Promise((resolve, reject) => {
+      openNextTaskAt(teamId, task.game_id, task.sort_order, completedAt, error => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
+
+  return {
+    completed: true,
+    completed_at: completedAt,
+    found_main: foundMain,
+    required_main_answers: requiredMainAnswers
+  };
+}
+
+
 
 function addSecondsToUtc(value, seconds) {
   const base = parseUtcDate(value);
@@ -929,7 +1150,8 @@ router.get("/:pin", (req, res) => {
                     olympiad,
                     multitask
                   });
-                }).catch(() => {
+                }).catch(error => {
+                  console.error("Play task payload error:", error);
                   res.status(500).json({ error: "Помилка завантаження завдання" });
                 });
               }
