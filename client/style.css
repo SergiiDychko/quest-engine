@@ -5060,3 +5060,50 @@ body.profile-body .profile-meta-grid {
   color: #b91c1c;
   font-weight: 700;
 }
+
+/* Unified instant help tooltips inside task code tables.
+   These use the same .help-tooltip markup as the game editor status help. */
+.codes-table {
+  overflow: visible;
+}
+
+.codes-table th {
+  overflow: visible;
+  position: relative;
+}
+
+.codes-table .help-tooltip {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.codes-table .help-tooltip-text {
+  bottom: calc(100% + 10px);
+  width: max-content;
+  max-width: 520px;
+  min-width: 320px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: #111827;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.28);
+  z-index: 10000;
+}
+
+.codes-table .help-tooltip:hover .help-tooltip-text,
+.codes-table .help-tooltip:focus .help-tooltip-text,
+.codes-table .help-tooltip:focus-within .help-tooltip-text {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* The code tables no longer use .help-btn tooltips; keep any old help-btn from showing browser-like pseudo tooltips here. */
+.codes-table .help-btn::after,
+.codes-table .help-btn:hover::after,
+.codes-table .help-btn:focus::after {
+  display: none;
+  content: none;
+}
