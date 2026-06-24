@@ -51,10 +51,10 @@ app.use(
 );
 
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
-app.use(express.static(path.join(__dirname, "../client")));
+app.use(express.static(path.join(__dirname, "../client"), { index: false }));
 
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "../client/index.html"));
+  res.redirect("/login.html");
 });
 
 app.listen(PORT, () => {

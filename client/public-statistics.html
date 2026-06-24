@@ -128,12 +128,6 @@ function formatScoreTaskCell(team, task) {
   return `<div class="task-main-time">${formatScoreNumber(sum)}</div><div class="task-time-details">(${escapeHtml(QETime.formatLocalTime(task.opened_at))} — ${escapeHtml(QETime.formatLocalTime(finish))})</div>`;
 }
 
-function formatScoreAdjustments(team) {
-  const events = (team.score_events || []).filter(event => event.event_type !== "TASK_COMPLETE");
-  const sum = events.reduce((total, event) => total + (Number(event.points) || 0), 0);
-  if (!events.length || sum === 0) return "-";
-  return `<div>${formatScoreNumber(sum)}</div>`;
-}
 
 function formatTaskCell(task) {
   if (!task.cell || task.cell.status === "not_started") {
@@ -343,6 +337,7 @@ function renderDetailedTable(teams, tasks) {
             `).join("")}
 
             <th>Від старту<br>до фінішу</th>
+            <th>Бонуси / штрафи</th>
             <th>Ігровий час</th>
             <th>Відставання від<br>попередньої</th>
             <th>Відставання від<br>першої</th>

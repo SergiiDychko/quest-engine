@@ -115,9 +115,6 @@ function generateOlympiadCellsMeta(associationCount, levelCount) {
   return cells;
 }
 
-function getOlympiadTotalCells(associationCount, levelCount) {
-  return generateOlympiadCellsMeta(associationCount, levelCount).length;
-}
 
 router.get("/:id", requireAuth, requireTaskCapability("canView"), (req, res) => {
   const taskId = req.params.id;

@@ -1820,25 +1820,6 @@ document.getElementById("saveAutoTransitionBtn").addEventListener("click", async
 });
 
 
-async function saveAllContentItemsSilently_DISABLED() {
-  const items = Array.from(document.querySelectorAll('textarea[id^="content-"]'));
-
-  for (const textarea of items) {
-    const contentId = textarea.id.replace("content-", "");
-    const response = await fetch(`/api/task-content/item/${contentId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: textarea.value })
-    });
-
-    if (!response.ok) {
-      const result = await response.json();
-      return { ok: false, error: result.error || "Помилка збереження контенту" };
-    }
-  }
-
-  return { ok: true };
-}
 
 async function saveAllHintsSilently() {
   if (currentTask && currentTask.task_type === "MULTITASK") {

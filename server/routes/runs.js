@@ -33,17 +33,6 @@ function buildPublicStatisticsUrl(req, runCode) {
 }
 
 
-function dbGetAsync(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (error, row) => error ? reject(error) : resolve(row));
-  });
-}
-
-function dbAllAsync(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows || []));
-  });
-}
 
 function dbRunAsync(sql, params = []) {
   return new Promise((resolve, reject) => {

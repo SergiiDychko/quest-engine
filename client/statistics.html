@@ -151,9 +151,6 @@ function getScoreEventsForTask(team, taskId) {
   return (team.score_events || []).filter(event => Number(event.task_id) === Number(taskId));
 }
 
-function getScoreEventsOutsideTasks(team) {
-  return (team.score_events || []).filter(event => !event.task_id);
-}
 
 function getTeamScoreGameTimeSeconds(team) {
   const start = team.started_at || team.created_at;
@@ -195,12 +192,6 @@ function formatScoreTaskCell(team, task) {
   `;
 }
 
-function formatScoreAdjustments(team) {
-  const events = (team.score_events || []).filter(event => event.event_type !== "TASK_COMPLETE");
-  const sum = events.reduce((total, event) => total + (Number(event.points) || 0), 0);
-  if (!events.length || sum === 0) return "-";
-  return `<div>${formatScoreNumber(sum)}</div>`;
-}
 
 function formatTaskCell(task) {
   if (!task.cell) {

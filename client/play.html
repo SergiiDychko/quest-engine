@@ -753,13 +753,6 @@ function parseOlympiadCellBlocks(value) {
   }
 }
 
-function olympiadCellHasContent(cell) {
-  const contentValue = String(cell?.content || "").trim();
-  if (!contentValue) return false;
-
-  const blocks = parseOlympiadCellBlocks(contentValue);
-  return Array.isArray(blocks) && blocks.length > 0;
-}
 
 function renderOlympiadCellContent(cell) {
   const contentValue = String(cell?.content || "").trim();
