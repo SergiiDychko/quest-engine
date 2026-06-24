@@ -12,7 +12,7 @@ function requireAuth(req, res, next) {
 }
 
 function getUploadDir() {
-  const uploadsDir = path.join(__dirname, "../../uploads");
+  const uploadsDir = process.env.UPLOADS_PATH || path.join(__dirname, "../../uploads");
   fs.mkdirSync(uploadsDir, { recursive: true });
   return uploadsDir;
 }
