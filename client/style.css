@@ -223,7 +223,7 @@ hr {
 
 .help-btn:hover::after,
 .help-btn:focus::after {
-  content: attr(title);
+  content: attr(data-tooltip);
   position: absolute;
   left: 50%;
   bottom: 130%;
