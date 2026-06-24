@@ -302,6 +302,87 @@ async function checkOlympiadCompletion(teamId, task) {
 }
 
 
+
+function parseRevealContent(content) {
+  if (!content) return {};
+  if (typeof content === "object") return content;
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function normalizeRevealCode(value) {
+  return normalizeAnswer(value);
+}
+
+function filterRevealContentRows(rows, foundCodeSet) {
+  return (rows || []).filter(row => {
+    const type = String(row.type || "").toUpperCase();
+    if (type !== "SECTION") return true;
+    const data = parseRevealContent(row.content);
+    const condition = String(data.reveal_condition || "IMMEDIATE").toUpperCase();
+    if (condition !== "CODE") return true;
+    return foundCodeSet.has(normalizeRevealCode(data.reveal_code));
+  });
+}
+
+async function getFoundCodeSetForTask(teamId, taskId) {
+  const rows = await dbAll(
+    `SELECT task_answers.answer_text
+     FROM team_found_answers
+     JOIN task_answers ON task_answers.id = team_found_answers.task_answer_id
+     WHERE team_found_answers.team_id = ? AND task_answers.task_id = ?`,
+    [teamId, taskId]
+  );
+  return new Set((rows || []).map(row => normalizeRevealCode(row.answer_text)).filter(Boolean));
+}
+
+async function getVisibleTaskContent(teamId, taskId) {
+  const rows = await dbAll(`SELECT * FROM task_content WHERE task_id = ? ORDER BY sort_order ASC, id ASC`, [taskId]);
+  const foundCodeSet = await getFoundCodeSetForTask(teamId, taskId);
+  return filterRevealContentRows(rows, foundCodeSet);
+}
+
+async function isMultitaskAnswerCurrentlyHidden(teamId, taskId, taskAnswerId) {
+  const subtask = await dbGet(
+    `SELECT * FROM multitask_subtasks WHERE task_id = ? AND task_answer_id = ?`,
+    [taskId, taskAnswerId]
+  );
+
+  if (!subtask) return false;
+
+  const condition = String(subtask.reveal_condition || "IMMEDIATE").toUpperCase();
+  if (condition !== "CODE") return false;
+
+  const alreadyFound = await dbGet(
+    `SELECT team_found_answers.id
+     FROM team_found_answers
+     WHERE team_found_answers.team_id = ?
+       AND team_found_answers.task_answer_id = ?`,
+    [teamId, taskAnswerId]
+  );
+
+  if (alreadyFound) return false;
+
+  const revealCode = normalizeRevealCode(subtask.reveal_code);
+  if (!revealCode) return false;
+
+  const foundCodes = await dbAll(
+    `SELECT multitask_subtasks.answer_text
+     FROM multitask_subtasks
+     JOIN team_found_answers
+       ON team_found_answers.task_answer_id = multitask_subtasks.task_answer_id
+      AND team_found_answers.team_id = ?
+     WHERE multitask_subtasks.task_id = ?`,
+    [teamId, taskId]
+  );
+
+  return !(foundCodes || []).some(row => normalizeRevealCode(row.answer_text) === revealCode);
+}
+
 async function getMultitaskPayload(teamId, taskId) {
   const settings = await dbGet(
     `SELECT * FROM multitask_settings WHERE task_id = ?`,
@@ -336,7 +417,9 @@ async function getMultitaskPayload(teamId, taskId) {
     subtasks: subtasks.map(item => ({
       id: item.id,
       sort_order: item.sort_order,
-      content: item.content || "",
+      content: (String(item.reveal_condition || "IMMEDIATE").toUpperCase() === "CODE" && !item.found_at && !subtasks.some(found => found.found_at && normalizeRevealCode(found.answer_text) === normalizeRevealCode(item.reveal_code))) ? "" : (item.content || ""),
+      is_visible: !(String(item.reveal_condition || "IMMEDIATE").toUpperCase() === "CODE" && !item.found_at && !subtasks.some(found => found.found_at && normalizeRevealCode(found.answer_text) === normalizeRevealCode(item.reveal_code))),
+      reveal_condition: item.reveal_condition || "IMMEDIATE",
       answer_text: item.found_at ? item.answer_text : "",
       description: item.description || "",
       comment: item.found_at ? (item.comment || "") : "",
@@ -948,10 +1031,7 @@ async function buildStormPayload(gameData) {
 
     if (available) {
       item.task = task;
-      item.content = task.task_type === "MULTITASK" ? [] : await dbAll(
-        `SELECT * FROM task_content WHERE task_id = ? ORDER BY sort_order ASC, id ASC`,
-        [task.id]
-      );
+      item.content = task.task_type === "MULTITASK" ? [] : await getVisibleTaskContent(gameData.team_id, task.id);
       item.hints = task.task_type === "MULTITASK" ? [] : await dbAll(
         `
         SELECT task_hints.*, team_hint_purchases.purchased_at AS purchased_at
@@ -1223,12 +1303,12 @@ router.get("/:pin", (req, res) => {
                     task.task_type === "OLYMPIAD" ? getOlympiadPayload(gameData.team_id, task.id) : Promise.resolve(null),
                     task.task_type === "MULTITASK" ? getMultitaskPayload(gameData.team_id, task.id) : Promise.resolve(null)
                   ])
-                ).then(([olympiad, multitask]) => {
+                ).then(async ([olympiad, multitask]) => {
                   res.json({
                     status: "READY",
                     game: gameData,
                     task,
-                    content: task.task_type === "MULTITASK" ? [] : content,
+                    content: task.task_type === "MULTITASK" ? [] : await getVisibleTaskContent(gameData.team_id, task.id),
                     hints: task.task_type === "MULTITASK" ? [] : hints,
                     answers: task.hide_answers_block ? [] : answers,
                     found_answers: foundAnswers,
@@ -1460,6 +1540,16 @@ router.post("/:pin/answer", async (req, res) => {
         return correctAnswer && correctAnswer === normalizedSubmitted;
       });
 
+      let answerIsAcceptableNow = Boolean(foundAnswer);
+      let hiddenMultitaskSubtask = false;
+
+      if (foundAnswer && String(task.task_type || "STANDARD").toUpperCase() === "MULTITASK") {
+        hiddenMultitaskSubtask = await isMultitaskAnswerCurrentlyHidden(gameData.team_id, task.id, foundAnswer.id);
+        if (hiddenMultitaskSubtask) {
+          answerIsAcceptableNow = false;
+        }
+      }
+
       await dbRun(
         `
         INSERT INTO team_answers (
@@ -1474,19 +1564,19 @@ router.post("/:pin/answer", async (req, res) => {
           gameData.team_id,
           task.id,
           submittedCode,
-          foundAnswer ? 1 : 0
+          answerIsAcceptableNow ? 1 : 0
         ]
       );
 
-      if (!foundAnswer) {
-        results.push({
-          code: submittedCode.toUpperCase(),
-          status: "rejected",
-          message: `Код ${submittedCode.toUpperCase()} не прийнято`
-        });
+if (!foundAnswer || hiddenMultitaskSubtask) {
+  results.push({
+    code: submittedCode.toUpperCase(),
+    status: "rejected",
+    message: `Код ${submittedCode.toUpperCase()} не прийнято`
+  });
 
-        continue;
-      }
+  continue;
+}
 
       const existingFound = await dbGet(
         `
@@ -1687,6 +1777,8 @@ router.post("/:pin/answer", async (req, res) => {
       ? await getMultitaskPayload(gameData.team_id, task.id)
       : null;
 
+    const refreshedContent = task.task_type === "MULTITASK" ? [] : await getVisibleTaskContent(gameData.team_id, task.id);
+
     const refreshedStorm = String(gameData.game_type || "LINEAR").toUpperCase() === "STORM"
       ? await buildStormPayload(gameData)
       : null;
@@ -1707,6 +1799,7 @@ router.post("/:pin/answer", async (req, res) => {
       olympiad,
       multitask,
       storm: refreshedStorm,
+      content: refreshedContent,
       found_main: completeResult.found_main,
       required_main_answers: completeResult.required_main_answers
     });

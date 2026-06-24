@@ -699,6 +699,17 @@ router.put("/:id/multitask", requireAuth, requireTaskCapability("canEdit"), asyn
     return res.status(400).json({ error: formatDuplicateCodeMessage(duplicate) });
   }
 
+  const multitaskCodeSet = new Set(subtasks.map(subtask => normalizeCodeForDuplicateCheck(subtask.answer_text)).filter(Boolean));
+  const badReveal = subtasks.find(subtask => {
+    const condition = String(subtask.reveal_condition || "IMMEDIATE").toUpperCase();
+    if (condition !== "CODE") return false;
+    return !multitaskCodeSet.has(normalizeCodeForDuplicateCheck(subtask.reveal_code));
+  });
+
+  if (badReveal) {
+    return res.status(400).json({ error: "Умова появи містить код, якого немає в цьому Multitask" });
+  }
+
   try {
     await dbRun("BEGIN TRANSACTION");
 
@@ -740,8 +751,8 @@ router.put("/:id/multitask", requireAuth, requireTaskCapability("canEdit"), asyn
         `INSERT INTO multitask_subtasks (
           task_id, sort_order, content, answer_text, description, comment,
           hint_type, hint_text, hint_after_seconds, hint_purchase_after_seconds,
-          hint_purchase_value, task_answer_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          hint_purchase_value, task_answer_id, reveal_condition, reveal_code
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           taskId,
           sortOrder,
@@ -754,7 +765,9 @@ router.put("/:id/multitask", requireAuth, requireTaskCapability("canEdit"), asyn
           Math.max(0, Number(subtask.hint_after_seconds) || 0),
           Math.max(0, Number(subtask.hint_purchase_after_seconds) || 0),
           Math.max(0, Number(subtask.hint_purchase_value) || 0),
-          answerResult.lastID
+          answerResult.lastID,
+          String(subtask.reveal_condition || "IMMEDIATE").toUpperCase() === "CODE" ? "CODE" : "IMMEDIATE",
+          String(subtask.reveal_condition || "IMMEDIATE").toUpperCase() === "CODE" ? String(subtask.reveal_code || "").trim() : null
         ]
       );
     }

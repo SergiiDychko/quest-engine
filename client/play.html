@@ -995,6 +995,10 @@ async function buyOlympiadCell(cellNumber) {
 
   showPlainAnswerMessage(result.message || "Код куплено", "success");
 
+  if (Array.isArray(result.content)) {
+    renderContent(result.content);
+  }
+
   if (result.olympiad) {
     currentOlympiad = result.olympiad;
     renderOlympiad();
@@ -1077,6 +1081,10 @@ function renderMultitask() {
 }
 
 function renderMultitaskSubtask(subtask) {
+  if (subtask.is_visible === false) {
+    return "";
+  }
+
   if (subtask.is_found) {
     const comment = String(subtask.comment || "").trim();
     return `
@@ -1659,6 +1667,18 @@ async function submitAnswer() {
   if (result.storm) {
     currentStorm = result.storm;
     renderStormShell({ game: { game_type: currentGameType }, storm: currentStorm, task: currentTask });
+
+    const selectedItem = getStormTaskItem(selectedStormTaskId || currentTask?.id);
+    if (selectedItem) {
+      if (Array.isArray(result.content)) selectedItem.content = result.content;
+      if (result.multitask) selectedItem.multitask = result.multitask;
+      if (result.olympiad) selectedItem.olympiad = result.olympiad;
+      currentTask = selectedItem.task || currentTask;
+    }
+  }
+
+  if (Array.isArray(result.content)) {
+    renderContent(result.content);
   }
 
   if (Array.isArray(result.found_items)) {

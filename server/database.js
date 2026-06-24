@@ -208,6 +208,8 @@ db.run(`
       hint_purchase_after_seconds INTEGER NOT NULL DEFAULT 0,
       hint_purchase_value INTEGER NOT NULL DEFAULT 0,
       task_answer_id INTEGER,
+      reveal_condition TEXT NOT NULL DEFAULT 'IMMEDIATE',
+      reveal_code TEXT,
       FOREIGN KEY (task_id) REFERENCES tasks(id),
       FOREIGN KEY (task_answer_id) REFERENCES task_answers(id)
     )
@@ -384,6 +386,8 @@ db.run(`
   db.run(`ALTER TABLE olympiad_settings ADD COLUMN purchase_available_after_seconds INTEGER NOT NULL DEFAULT 0`, () => {});
   db.run(`ALTER TABLE olympiad_cells ADD COLUMN purchase_value INTEGER NOT NULL DEFAULT 0`, () => {});
   db.run(`ALTER TABLE olympiad_cells ADD COLUMN task_answer_id INTEGER`, () => {});
+  db.run(`ALTER TABLE multitask_subtasks ADD COLUMN reveal_condition TEXT NOT NULL DEFAULT 'IMMEDIATE'`, () => {});
+  db.run(`ALTER TABLE multitask_subtasks ADD COLUMN reveal_code TEXT`, () => {});
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_olympiad_cells_task_cell ON olympiad_cells(task_id, cell_number)`);
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_game_permissions_game_user ON game_permissions(game_id, user_id)`);
   db.run(`UPDATE users SET role = 'AUTHOR' WHERE role = 'MODERATOR'`, () => {});

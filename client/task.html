@@ -435,6 +435,7 @@ async function loadContent() {
     root: contentRoot,
     blocks,
     onChange: markTaskDraftDirty,
+    getAvailableRevealCodes: () => currentAnswers.map(answer => document.querySelector(`[data-id="${answer.id}"][data-field="answer_text"]`)?.value || answer.answer_text),
     previewTitle: currentTask
       ? (String(currentTask.title || "").trim() ? `Завдання ${currentTask.sort_order}. ${currentTask.title}` : `Завдання ${currentTask.sort_order}.`)
       : "Попередній перегляд завдання"
@@ -1124,7 +1125,9 @@ function makeMultitaskSubtask() {
     hint_text: "",
     hint_after_seconds: 0,
     hint_purchase_after_seconds: 0,
-    hint_purchase_value: 0
+    hint_purchase_value: 0,
+    reveal_condition: "IMMEDIATE",
+    reveal_code: ""
   };
 }
 
@@ -1209,6 +1212,13 @@ function renderMultitaskEditor() {
     updateMultitaskHintFields(select.closest("[data-multitask-subtask]"));
   });
 
+  root.querySelectorAll('select[data-field="reveal_condition"]').forEach(select => {
+    select.addEventListener("change", () => {
+      const row = select.closest(".reveal-condition-row");
+      row?.querySelector('[data-field="reveal_code"]')?.classList.toggle("hidden", select.value !== "CODE");
+    });
+  });
+
   root.querySelectorAll("input, textarea, select").forEach(input => {
     input.addEventListener("input", () => { collectMultitaskEditorState(); markTaskDraftDirty(); });
     input.addEventListener("change", () => { collectMultitaskEditorState(); markTaskDraftDirty(); });
@@ -1221,11 +1231,27 @@ function renderMultitaskEditor() {
 function renderMultitaskSubtaskEditor(subtask, index) {
   const id = escapeHtml(subtask.id);
   const hintType = subtask.hint_type || "NONE";
+  const revealCondition = String(subtask.reveal_condition || "IMMEDIATE").toUpperCase() === "CODE" ? "CODE" : "IMMEDIATE";
+  const revealCode = String(subtask.reveal_code || "");
+  const codeValues = (currentMultitask?.subtasks || []).map(item => normalizeCodeForDuplicateCheck(item.answer_text)).filter(Boolean);
+  const revealCodeExists = codeValues.includes(normalizeCodeForDuplicateCheck(revealCode));
+  const revealErrorVisible = revealCondition === "CODE" && (!normalizeCodeForDuplicateCheck(revealCode) || !revealCodeExists);
 
   return `
     <div class="multitask-subtask-card" data-multitask-subtask="${id}" data-subtask-content="${escapeHtml(subtask.content || "")}">
       <div class="builder-block-header">
-        <strong>${index + 1}. Підзавдання</strong>
+        <div class="builder-block-title-stack">
+          <strong>${index + 1}. Підзавдання</strong>
+          <div class="reveal-condition-row">
+            <span>Умова появи:</span>
+            <select data-field="reveal_condition">
+              <option value="IMMEDIATE" ${revealCondition !== "CODE" ? "selected" : ""}>відразу</option>
+              <option value="CODE" ${revealCondition === "CODE" ? "selected" : ""}>після введення коду</option>
+            </select>
+            <input class="reveal-code-input ${revealCondition === "CODE" ? "" : "hidden"}" data-field="reveal_code" value="${escapeHtml(revealCode)}" placeholder="код">
+            <span class="reveal-code-error ${revealErrorVisible ? "" : "hidden"}">такого коду немає в завданні</span>
+          </div>
+        </div>
         <div class="builder-block-actions">
           <button type="button" data-action="move-multitask-subtask" data-subtask-id="${id}" data-direction="-1" ${index === 0 ? "disabled" : ""}>↑</button>
           <button type="button" data-action="move-multitask-subtask" data-subtask-id="${id}" data-direction="1" ${index === (currentMultitask.subtasks.length - 1) ? "disabled" : ""}>↓</button>
@@ -1321,7 +1347,9 @@ function collectMultitaskEditorState() {
     hint_text: card.querySelector('[data-field="hint_text"]')?.value || "",
     hint_after_seconds: Number(card.querySelector('[data-field="hint_after_seconds"]')?.value) || 0,
     hint_purchase_after_seconds: Number(card.querySelector('[data-field="hint_purchase_after_seconds"]')?.value) || 0,
-    hint_purchase_value: Number(card.querySelector('[data-field="hint_purchase_value"]')?.value) || 0
+    hint_purchase_value: Number(card.querySelector('[data-field="hint_purchase_value"]')?.value) || 0,
+    reveal_condition: card.querySelector('[data-field="reveal_condition"]')?.value === "CODE" ? "CODE" : "IMMEDIATE",
+    reveal_code: card.querySelector('[data-field="reveal_condition"]')?.value === "CODE" ? (card.querySelector('[data-field="reveal_code"]')?.value || "") : ""
   }));
 
   currentMultitask.settings = {
@@ -1422,6 +1450,14 @@ async function saveMultitask(options = {}) {
 
   const duplicateValidation = validateNoDuplicateCodes(collectMultitaskCodesForDuplicateValidation());
   if (!duplicateValidation.ok) return duplicateValidation;
+
+  const codeSet = new Set(subtasks.map(item => normalizeCodeForDuplicateCheck(item.answer_text)).filter(Boolean));
+  const badReveal = subtasks.find(item => item.reveal_condition === "CODE" && !codeSet.has(normalizeCodeForDuplicateCheck(item.reveal_code)));
+  if (badReveal) {
+    const error = "Умова появи містить код, якого немає в цьому Multitask.";
+    alert(error);
+    return { ok: false, error };
+  }
 
   const completionType = currentMultitask.settings.completion_type || "ALL";
   const requiredCount = completionType === "COUNT"
@@ -1960,8 +1996,8 @@ async function saveStormUnlockSettingsSilently() {
 window.saveTaskChangesFromParent = async function () {
   const steps = [
     () => saveTaskHeader({ silent: true, skipReload: true }),
-    saveContentBlocksSilently,
     saveAllCodesSilently,
+    saveContentBlocksSilently,
     () => saveMultitask({ silent: true }),
     saveAllHintsSilently,
     saveAutoTransitionSilently,

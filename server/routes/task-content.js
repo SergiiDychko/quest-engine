@@ -13,6 +13,39 @@ function requireAuth(req, res, next) {
 }
 
 
+function normalizeRevealCode(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function parseContent(content) {
+  if (!content) return {};
+  if (typeof content === "object") return content;
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function collectRevealErrorsFromBlocks(blocks, allowedCodes, pathPrefix = "") {
+  const errors = [];
+  (blocks || []).forEach((block, index) => {
+    const path = pathPrefix ? `${pathPrefix}:${index}` : String(index);
+    const type = String(block.type || "").toUpperCase();
+    if (type !== "SECTION") return;
+    const data = parseContent(block.content);
+    const condition = String(data.reveal_condition || "IMMEDIATE").toUpperCase();
+    const code = normalizeRevealCode(data.reveal_code);
+    if (condition === "CODE" && (!code || !allowedCodes.has(code))) errors.push(path);
+    const columns = Array.isArray(data.columns) ? data.columns : [];
+    columns.forEach((column, columnIndex) => {
+      errors.push(...collectRevealErrorsFromBlocks(column.blocks || [], allowedCodes, `${path}:${columnIndex}`));
+    });
+  });
+  return errors;
+}
+
 function requireTaskCapability(capability) {
   return async (req, res, next) => {
     let taskId = Number(req.params.taskId);
@@ -109,17 +142,6 @@ router.put("/:taskId/bulk", requireAuth, requireTaskCapability("canEdit"), (req,
 
   const allowedTypes = new Set(["TEXT", "IMAGE", "VIDEO", "AUDIO", "HTML", "SECTION"]);
 
-  function parseContent(content) {
-    if (!content) return {};
-    if (typeof content === "object") return content;
-
-    try {
-      const parsed = JSON.parse(content);
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (error) {
-      return {};
-    }
-  }
 
   function validateBlock(block) {
     const type = String(block.type || "").toUpperCase();
@@ -156,6 +178,18 @@ router.put("/:taskId/bulk", requireAuth, requireTaskCapability("canEdit"), (req,
       return res.status(400).json({ error: "Некоректний тип блоку" });
     }
   }
+
+  db.all(`SELECT answer_text FROM task_answers WHERE task_id = ?`, [taskId], (answersError, answers) => {
+    if (answersError) {
+      return res.status(500).json({ error: "Помилка перевірки кодів появи" });
+    }
+
+    const allowedCodes = new Set((answers || []).map(answer => normalizeRevealCode(answer.answer_text)).filter(Boolean));
+    const revealErrors = collectRevealErrorsFromBlocks(blocks, allowedCodes);
+
+    if (revealErrors.length) {
+      return res.status(400).json({ error: "Умова появи містить код, якого немає в завданні" });
+    }
 
   db.serialize(() => {
     db.run("BEGIN TRANSACTION");
@@ -207,6 +241,7 @@ router.put("/:taskId/bulk", requireAuth, requireTaskCapability("canEdit"), (req,
         });
       }
     );
+  });
   });
 });
 

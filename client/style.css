@@ -5308,3 +5308,40 @@ body.profile-body .profile-meta-grid {
     max-width: none;
   }
 }
+
+/* Reveal conditions for task content sections and Multitask subtasks */
+.builder-block-title-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.reveal-condition-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #4b5563;
+}
+
+.reveal-condition-row select,
+.reveal-condition-row input {
+  min-height: 34px;
+  border: 1px solid #d8e1ee;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 6px 10px;
+  font: inherit;
+}
+
+.reveal-code-input {
+  width: 180px;
+}
+
+.reveal-code-error {
+  color: #b91c1c;
+  font-weight: 700;
+}

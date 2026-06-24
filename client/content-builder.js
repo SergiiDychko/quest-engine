@@ -69,6 +69,8 @@
     if (type === "AUDIO") return { source: "URL", url: "" };
     if (type === "HTML") return { html: "", css: "", js: "", isolated: true };
     if (type === "SECTION") return {
+      reveal_condition: "IMMEDIATE",
+      reveal_code: "",
       columns: [
         { width: 100, blocks: [] }
       ]
@@ -136,6 +138,8 @@
 
     if (type === "SECTION") {
       const columns = Array.isArray(data.columns) && data.columns.length ? data.columns : defaultData("SECTION").columns;
+      data.reveal_condition = String(data.reveal_condition || "IMMEDIATE").toUpperCase() === "CODE" ? "CODE" : "IMMEDIATE";
+      data.reveal_code = data.reveal_condition === "CODE" ? String(data.reveal_code || "").trim() : "";
       data.columns = columns.map(column => ({
         width: Number(column.width) || 50,
         blocks: Array.isArray(column.blocks) ? column.blocks.map(normalizeBlock) : []
@@ -215,6 +219,9 @@
       this.blocks = (options.blocks || []).map(normalizeBlock);
       this.onChange = options.onChange || function () {};
       this.previewTitle = options.previewTitle || "Попередній перегляд";
+      this.getAvailableRevealCodes = typeof options.getAvailableRevealCodes === "function"
+        ? options.getAvailableRevealCodes
+        : () => [];
       this.textEditors = new Map();
       this.render();
     }
@@ -237,6 +244,8 @@
     serializeBlock(block, preview = false) {
       if (block.type === "SECTION") {
         const data = {
+          reveal_condition: block.data.reveal_condition === "CODE" ? "CODE" : "IMMEDIATE",
+          reveal_code: block.data.reveal_condition === "CODE" ? String(block.data.reveal_code || "").trim() : "",
           columns: (block.data.columns || []).map(column => ({
             width: Number(column.width) || 0,
             blocks: (column.blocks || []).map(child => this.serializeBlock(child, preview))
@@ -394,6 +403,35 @@
       return invalid;
     }
 
+
+    normalizeRevealCode(value) {
+      return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+    }
+
+    getRevealCodeSet() {
+      return new Set((this.getAvailableRevealCodes() || []).map(code => this.normalizeRevealCode(code)).filter(Boolean));
+    }
+
+    validateRevealConditions() {
+      const invalid = [];
+      const available = this.getRevealCodeSet();
+      const check = (blocks, prefix = "") => {
+        blocks.forEach((block, index) => {
+          const path = prefix ? `${prefix}:${index}` : String(index);
+          if (block.type === "SECTION") {
+            const condition = String(block.data.reveal_condition || "IMMEDIATE").toUpperCase();
+            const code = this.normalizeRevealCode(block.data.reveal_code || "");
+            if (condition === "CODE" && (!code || !available.has(code))) {
+              invalid.push(path);
+            }
+            (block.data.columns || []).forEach((column, columnIndex) => check(column.blocks || [], `${path}:${columnIndex}`));
+          }
+        });
+      };
+      check(this.blocks);
+      return invalid;
+    }
+
     syncFromDom() {
       if (!this.root) return;
 
@@ -430,6 +468,10 @@
         }
 
         if (block.type === "SECTION") {
+          const revealSelect = wrapper.querySelector(`[data-section-reveal-condition="${path}"]`);
+          const revealCodeInput = wrapper.querySelector(`[data-section-reveal-code="${path}"]`);
+          block.data.reveal_condition = String(revealSelect?.value || "IMMEDIATE").toUpperCase() === "CODE" ? "CODE" : "IMMEDIATE";
+          block.data.reveal_code = block.data.reveal_condition === "CODE" ? String(revealCodeInput?.value || "").trim() : "";
           (block.data.columns || []).forEach((column, columnIndex) => {
             const widthInput = this.root.querySelector(`[data-section-width="${path}:${columnIndex}"]`);
             column.width = Math.max(1, Math.min(100, Number(widthInput?.value) || column.width || 1));
@@ -499,6 +541,15 @@
         input.addEventListener("change", () => this.onChange());
       });
 
+      this.root.querySelectorAll("[data-section-reveal-condition]").forEach(select => {
+        select.addEventListener("change", () => {
+          const path = select.dataset.sectionRevealCondition;
+          const input = this.root.querySelector(`[data-section-reveal-code="${path}"]`);
+          if (input) input.classList.toggle("hidden", select.value !== "CODE");
+          this.onChange();
+        });
+      });
+
       this.initTextEditors();
     }
 
@@ -508,7 +559,10 @@
       return `
         <div class="builder-block ${block.type === "SECTION" ? "builder-section-block" : ""}" data-builder-path="${path}" data-block-id="${escapeHtml(block.id)}">
           <div class="builder-block-header">
-            <strong>${index + 1}. ${labelForType(block.type)}</strong>
+            <div class="builder-block-title-stack">
+              <strong>${index + 1}. ${labelForType(block.type)}</strong>
+              ${block.type === "SECTION" ? this.renderRevealConditionRow(block, path) : ""}
+            </div>
             <div class="builder-block-actions">
               <button type="button" data-action="up" data-path="${path}" ${index === 0 ? "disabled" : ""}>↑</button>
               <button type="button" data-action="down" data-path="${path}" ${index === siblingCount - 1 ? "disabled" : ""}>↓</button>
@@ -518,6 +572,26 @@
           <div class="builder-block-body">
             ${this.renderEditor(block, path)}
           </div>
+        </div>
+      `;
+    }
+
+    renderRevealConditionRow(block, path) {
+      const data = block.data || {};
+      const condition = String(data.reveal_condition || "IMMEDIATE").toUpperCase() === "CODE" ? "CODE" : "IMMEDIATE";
+      const code = String(data.reveal_code || "");
+      const available = this.getRevealCodeSet();
+      const normalized = this.normalizeRevealCode(code);
+      const hasError = condition === "CODE" && (!normalized || !available.has(normalized));
+      return `
+        <div class="reveal-condition-row">
+          <span>Умова появи:</span>
+          <select data-section-reveal-condition="${path}">
+            <option value="IMMEDIATE" ${condition !== "CODE" ? "selected" : ""}>відразу</option>
+            <option value="CODE" ${condition === "CODE" ? "selected" : ""}>після введення коду</option>
+          </select>
+          <input class="reveal-code-input ${condition === "CODE" ? "" : "hidden"}" data-section-reveal-code="${path}" value="${escapeHtml(code)}" placeholder="код">
+          <span class="reveal-code-error ${hasError ? "" : "hidden"}">такого коду немає в завданні</span>
         </div>
       `;
     }

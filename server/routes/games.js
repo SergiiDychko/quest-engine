@@ -216,9 +216,9 @@ async function copyTaskToGame(sourceTaskId, targetGameId, options = {}) {
         `
         INSERT INTO multitask_subtasks (
           task_id, sort_order, content, answer_text, description, comment, hint_type,
-          hint_text, hint_after_seconds, hint_purchase_after_seconds, hint_purchase_value, task_answer_id
+          hint_text, hint_after_seconds, hint_purchase_after_seconds, hint_purchase_value, task_answer_id, reveal_condition, reveal_code
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           newTaskId,
@@ -232,7 +232,9 @@ async function copyTaskToGame(sourceTaskId, targetGameId, options = {}) {
           subtask.hint_after_seconds || 0,
           subtask.hint_purchase_after_seconds || 0,
           winnerChanged ? 0 : (Number(subtask.hint_purchase_value) || 0),
-          answerIdMap.get(Number(subtask.task_answer_id)) || null
+          answerIdMap.get(Number(subtask.task_answer_id)) || null,
+          subtask.reveal_condition || "IMMEDIATE",
+          subtask.reveal_code || null
         ]
       );
     }
@@ -1196,9 +1198,11 @@ router.post("/:id/copy", requireAuth, async (req, res) => {
               hint_after_seconds,
               hint_purchase_after_seconds,
               hint_purchase_value,
-              task_answer_id
+              task_answer_id,
+              reveal_condition,
+              reveal_code
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
             [
               newTaskId,
@@ -1212,7 +1216,9 @@ router.post("/:id/copy", requireAuth, async (req, res) => {
               subtask.hint_after_seconds || 0,
               subtask.hint_purchase_after_seconds || 0,
               winnerChanged ? 0 : (Number(subtask.hint_purchase_value) || 0),
-              answerIdMap.get(Number(subtask.task_answer_id)) || null
+              answerIdMap.get(Number(subtask.task_answer_id)) || null,
+              subtask.reveal_condition || "IMMEDIATE",
+              subtask.reveal_code || null
             ]
           );
         }
