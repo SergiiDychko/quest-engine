@@ -1662,10 +1662,10 @@ function renderCodeTable(title, answers, showSeconds) {
         <thead>
           <tr>
             <th>№</th>
-            <th>Значення <button type="button" class="help-btn" data-tooltip="Тут введіть правильну відповідь" aria-label="Тут введіть правильну відповідь">?</button></th>
-            <th>Опис <button type="button" class="help-btn" data-tooltip="Наприклад: одне слово, кирилиця" aria-label="Наприклад: одне слово, кирилиця">?</button></th>
-            <th>Коментар <button type="button" class="help-btn" data-tooltip="Зʼявиться після здачі коду" aria-label="Зʼявиться після здачі коду">?</button></th>
-            ${showSeconds ? `<th>${valueColumnTitle} <button type="button" class="help-btn" data-tooltip="${valueColumnHelp}" aria-label="${valueColumnHelp}">?</button></th>` : ""}
+            <th>Значення <button type="button" class="help-tooltip" data-tooltip="Тут введіть правильну відповідь" aria-label="Тут введіть правильну відповідь">?</button></th>
+            <th>Опис <button type="button" class="help-tooltip" data-tooltip="Наприклад: одне слово, кирилиця" aria-label="Наприклад: одне слово, кирилиця">?</button></th>
+            <th>Коментар <button type="button" class="help-tooltip" data-tooltip="Зʼявиться після здачі коду" aria-label="Зʼявиться після здачі коду">?</button></th>
+            ${showSeconds ? `<th>${valueColumnTitle} <button type="button" class="help-tooltip" data-tooltip="${valueColumnHelp}" aria-label="${valueColumnHelp}">?</button></th>` : ""}
             <th class="delete-column"></th>
           </tr>
         </thead>
