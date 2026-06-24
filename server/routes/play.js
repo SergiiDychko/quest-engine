@@ -187,6 +187,140 @@ function normalizeRunStatusForPlay(gameData) {
   return gameData;
 }
 
+function defaultGamePage(pageType) {
+  const defaults = {
+    START: {
+      page_type: "START",
+      title: "Старт гри",
+      content: "Вітаємо на грі!",
+      custom_css: ""
+    },
+    JOIN: {
+      page_type: "JOIN",
+      title: "Реєстрація команди",
+      content: JSON.stringify({
+        heading: "Реєстрація команди",
+        description: "Введіть назву команди, щоб отримати посилання на гру.",
+        button_text: "Створити команду"
+      }),
+      custom_css: ""
+    },
+    FINISH: {
+      page_type: "FINISH",
+      title: "Гру завершено",
+      content: "Вітаємо! Ви завершили гру.",
+      custom_css: ""
+    }
+  };
+
+  return defaults[pageType] || {
+    page_type: pageType,
+    title: "",
+    content: "",
+    custom_css: ""
+  };
+}
+
+function getGamePage(gameId, pageType, callback) {
+  const normalizedPageType = String(pageType || "").toUpperCase();
+
+  db.get(
+    `
+    SELECT
+      page_type,
+      title,
+      content,
+      custom_css
+    FROM game_pages
+    WHERE game_id = ?
+      AND page_type = ?
+    LIMIT 1
+    `,
+    [gameId, normalizedPageType],
+    (error, page) => {
+      if (error) return callback(error);
+      callback(null, page || defaultGamePage(normalizedPageType));
+    }
+  );
+}
+
+function parseContentData(content) {
+  if (!content) return {};
+  if (typeof content === "object") return content;
+
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function normalizeRevealCode(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+async function getFoundCodeSetForTask(teamId, taskId) {
+  const rows = await dbAll(
+    `
+    SELECT task_answers.answer_text
+    FROM team_found_answers
+    JOIN task_answers
+      ON task_answers.id = team_found_answers.task_answer_id
+    WHERE team_found_answers.team_id = ?
+      AND task_answers.task_id = ?
+    `,
+    [teamId, taskId]
+  );
+
+  return new Set(
+    rows
+      .map(row => normalizeRevealCode(row.answer_text))
+      .filter(Boolean)
+  );
+}
+
+function filterVisibleNestedBlocks(blocks, foundCodes) {
+  if (!Array.isArray(blocks)) return [];
+
+  return blocks
+    .map(block => filterVisibleContentBlock(block, foundCodes))
+    .filter(Boolean);
+}
+
+function filterVisibleContentBlock(block, foundCodes) {
+  const type = String(block?.type || "").toUpperCase();
+
+  if (type !== "SECTION") {
+    return block;
+  }
+
+  const data = parseContentData(block.content);
+  const revealCondition = String(data.reveal_condition || "IMMEDIATE").toUpperCase();
+  const revealCode = normalizeRevealCode(data.reveal_code);
+
+  if (revealCondition === "CODE" && (!revealCode || !foundCodes.has(revealCode))) {
+    return null;
+  }
+
+  const columns = Array.isArray(data.columns) ? data.columns : [];
+  const filteredColumns = columns.map(column => ({
+    ...column,
+    blocks: filterVisibleNestedBlocks(column.blocks || [], foundCodes)
+  }));
+
+  return {
+    ...block,
+    content: JSON.stringify({
+      ...data,
+      columns: filteredColumns
+    })
+  };
+}
+
 function getGameDataByPin(pin, callback) {
   db.get(
     `
@@ -510,16 +644,23 @@ function completeTaskIfNeeded(teamId, task, callback) {
 }
 
 
-function getVisibleTaskContent(teamId, taskId) {
-  return dbAll(
-    `
-    SELECT *
-    FROM task_content
-    WHERE task_id = ?
-    ORDER BY sort_order ASC, id ASC
-    `,
-    [taskId]
-  );
+async function getVisibleTaskContent(teamId, taskId) {
+  const [content, foundCodes] = await Promise.all([
+    dbAll(
+      `
+      SELECT *
+      FROM task_content
+      WHERE task_id = ?
+      ORDER BY sort_order ASC, id ASC
+      `,
+      [taskId]
+    ),
+    getFoundCodeSetForTask(teamId, taskId)
+  ]);
+
+  return content
+    .map(block => filterVisibleContentBlock(block, foundCodes))
+    .filter(Boolean);
 }
 
 async function getOlympiadPayload(teamId, taskId) {
