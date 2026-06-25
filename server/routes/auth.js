@@ -303,7 +303,7 @@ router.post("/forgot-password", (req, res) => {
     return res.status(400).json({ error: "Вкажіть логін або електронну пошту" });
   }
 
-  const genericMessage = "Якщо користувача знайдено і для нього вказано email відновлення, інструкцію буде надіслано.";
+  const genericMessage = "Якщо користувача знайдено і для нього вказано email, інструкцію буде надіслано.";
 
   db.get(
     `
@@ -319,10 +319,11 @@ router.post("/forgot-password", (req, res) => {
         return res.status(500).json({ error: "Помилка бази даних" });
       }
 
-      if (!user || !user.recovery_email) {
+      if (!user || (!user.recovery_email && !user.email)) {
         return res.json({ message: genericMessage });
       }
 
+      const resetEmail = user.recovery_email || user.email;
       const token = crypto.randomBytes(32).toString("hex");
       const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
       const resetPath = `/reset-password.html?token=${token}`;
@@ -345,7 +346,7 @@ router.post("/forgot-password", (req, res) => {
           let mailResult = { sent: false, reason: "SMTP_NOT_CONFIGURED" };
           try {
             mailResult = await sendPasswordResetEmail({
-              to: user.recovery_email,
+              to: resetEmail,
               resetUrl
             });
           } catch (mailError) {
@@ -353,7 +354,7 @@ router.post("/forgot-password", (req, res) => {
           }
 
           if (!mailResult.sent) {
-            console.log("Password reset link for", user.recovery_email, resetUrl);
+            console.log("Password reset link for", resetEmail, resetUrl);
           }
 
           res.json({

@@ -1,6 +1,33 @@
+function cleanEnv(value) {
+  let result = String(value || "").trim();
+
+  if (
+    (result.startsWith('"') && result.endsWith('"')) ||
+    (result.startsWith("'") && result.endsWith("'"))
+  ) {
+    result = result.slice(1, -1).trim();
+  }
+
+  return result
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'");
+}
+
+function isPlaceholder(value) {
+  const cleaned = cleanEnv(value).toLowerCase();
+
+  return (
+    !cleaned ||
+    cleaned.includes("example.com") ||
+    cleaned.includes("your-domain.com") ||
+    cleaned.includes("your-smtp") ||
+    cleaned.includes("replace-with")
+  );
+}
+
 function getPublicBaseUrl(req) {
-  const configured = String(process.env.APP_BASE_URL || "").trim().replace(/\/$/, "");
-  if (configured) return configured;
+  const configured = cleanEnv(process.env.APP_BASE_URL).replace(/\/$/, "");
+  if (configured && !isPlaceholder(configured)) return configured;
 
   const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
   const host = req.headers["x-forwarded-host"] || req.get("host");
@@ -9,11 +36,11 @@ function getPublicBaseUrl(req) {
 
 function isMailConfigured() {
   return Boolean(
-    process.env.SMTP_HOST &&
-    process.env.SMTP_PORT &&
-    process.env.SMTP_USER &&
-    process.env.SMTP_PASS &&
-    process.env.MAIL_FROM
+    !isPlaceholder(process.env.SMTP_HOST) &&
+    !isPlaceholder(process.env.SMTP_PORT) &&
+    !isPlaceholder(process.env.SMTP_USER) &&
+    !isPlaceholder(process.env.SMTP_PASS) &&
+    !isPlaceholder(process.env.MAIL_FROM)
   );
 }
 
@@ -29,12 +56,12 @@ function createTransporter() {
   }
 
   return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT),
-    secure: String(process.env.SMTP_SECURE || "false").toLowerCase() === "true",
+    host: cleanEnv(process.env.SMTP_HOST),
+    port: Number(cleanEnv(process.env.SMTP_PORT)),
+    secure: cleanEnv(process.env.SMTP_SECURE).toLowerCase() === "true",
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
+      user: cleanEnv(process.env.SMTP_USER),
+      pass: cleanEnv(process.env.SMTP_PASS)
     }
   });
 }
@@ -47,7 +74,7 @@ async function sendPasswordResetEmail({ to, resetUrl }) {
   }
 
   await transporter.sendMail({
-    from: process.env.MAIL_FROM,
+    from: cleanEnv(process.env.MAIL_FROM),
     to,
     subject: "Відновлення пароля Quest Engine",
     text: [
@@ -71,6 +98,7 @@ async function sendPasswordResetEmail({ to, resetUrl }) {
 }
 
 module.exports = {
+  cleanEnv,
   getPublicBaseUrl,
   isMailConfigured,
   sendPasswordResetEmail
